@@ -17,8 +17,13 @@ CONFIDENCE_WEIGHT: dict[Confidence, int] = {
 }
 
 
+def weight_breakdown(status: Status, confidence: Confidence) -> tuple[int, int]:
+    """返回 (状态权重, 缺口权重)；question_priority 由它求和得出。"""
+    return STATUS_WEIGHT[status], CONFIDENCE_WEIGHT[confidence]
+
+
 def compute_question_priority(status: Status, confidence: Confidence) -> int:
-    raw = STATUS_WEIGHT[status] + CONFIDENCE_WEIGHT[confidence]
+    raw = sum(weight_breakdown(status, confidence))
     return int((raw - 2) * 2.5 + 0.5)
 
 

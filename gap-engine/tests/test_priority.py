@@ -7,6 +7,7 @@ from gap_engine.priority import (
     STATUS_WEIGHT,
     compute_question_priority,
     sort_key,
+    weight_breakdown,
 )
 from gap_engine.schema import Confidence, Coverage, Status, Verdict
 
@@ -92,3 +93,25 @@ def test_sort_is_stable_on_equal_priority_by_claim_id():
     ordered = sorted(verdicts, key=sort_key)
     assert [v.claim_id for v in ordered] == ["c-a", "c-b", "c-c"]
     assert ordered == sorted(reversed(verdicts), key=sort_key)
+
+@pytest.mark.parametrize("status", list(Status))
+@pytest.mark.parametrize("confidence", list(Confidence))
+def test_weight_breakdown_matches_tables(status, confidence):
+    assert weight_breakdown(status, confidence) == (
+        STATUS_WEIGHT[status],
+        CONFIDENCE_WEIGHT[confidence],
+    )
+
+
+@pytest.mark.parametrize("status", list(Status))
+@pytest.mark.parametrize("confidence", list(Confidence))
+def test_weight_breakdown_sums_to_question_priority(status, confidence):
+    raw = sum(weight_breakdown(status, confidence))
+    assert compute_question_priority(status, confidence) == int((raw - 2) * 2.5 + 0.5)
+
+
+def test_weight_breakdown_unknown_enum_raises_keyerror():
+    with pytest.raises(KeyError):
+        weight_breakdown("bogus", Confidence.high)
+    with pytest.raises(KeyError):
+        weight_breakdown(Status.no_evidence, "bogus")

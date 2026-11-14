@@ -1,4 +1,4 @@
-"""命令行入口：``gap analyze`` / ``gap questions`` / ``gap spec``（C-CLI@1 / C-CLI@2）。"""
+"""命令行入口：``gap analyze`` / ``gap questions`` / ``gap spec``（C-CLI@1 / C-CLI@2 / C-CLI@3）。"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import sys
 from pathlib import Path
 
 from .metrics import compute
-from .pipeline import analyze_repo, render_spec_to, render_to
-from .priority import sort_key
+from .pipeline import analyze_repo, analyze_spec, render_spec_to, render_to
+from .priority import sort_key, weight_breakdown
 from .spec import parse_spec
 
 DEFAULT_OUT = "reports/report.md"
@@ -29,7 +29,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     questions = sub.add_parser("questions", help="按优先级列出会被问到的问题")
     questions.add_argument("repo")
+    questions.add_argument("--spec", default=None)
     questions.add_argument("--top", type=int, default=5)
+    questions.add_argument("--json", default=None)
 
     spec = sub.add_parser("spec", help="按需求清单对账仓库")
     spec.add_argument("repo")
@@ -44,6 +46,13 @@ def _missing_repo(repo: str) -> bool:
         return False
     print(f"error: 仓库路径不存在: {repo}", file=sys.stderr)
     return True
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def analyze(args: argparse.Namespace) -> int:
@@ -74,16 +83,53 @@ def questions(args: argparse.Namespace) -> int:
     if _missing_repo(args.repo):
         return 1
 
-    claims, verdicts = analyze_repo(Path(args.repo))
-    claim_by_id = {claim.id: claim for claim in claims}
-    top = max(1, args.top)
+    repo = Path(args.repo)
+    if args.spec:
+        spec_path = Path(args.spec)
+        try:
+            text = spec_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            print(f"spec 文件不存在：{args.spec}", file=sys.stderr)
+            return 2
 
-    ordered = sorted(verdicts, key=sort_key)[:top]
+        if not parse_spec(text):
+            print(SPEC_EMPTY_MESSAGE, file=sys.stderr)
+            return 2
+
+        analysis = analyze_spec(repo, text, spec_path=spec_path.name)
+        claims, verdicts = analysis.claims, analysis.verdicts
+    else:
+        claims, verdicts = analyze_repo(repo)
+
+    claim_by_id = {claim.id: claim for claim in claims}
+    ordered = sorted(verdicts, key=sort_key)[: max(1, args.top)]
+
+    rows: list[dict[str, object]] = []
     for verdict in ordered:
         claim = claim_by_id.get(verdict.claim_id)
         if claim is None:
             continue
-        print(f"[{verdict.question_priority}] {claim.text} → {verdict.question}")
+        status_weight, gap_weight = weight_breakdown(verdict.status, verdict.confidence)
+        print(
+            f"[{verdict.question_priority}] {claim.text} → {verdict.question}"
+            f"（状态 {verdict.status.value} +{status_weight}，"
+            f"缺口 {verdict.confidence.value} +{gap_weight}）"
+        )
+        rows.append(
+            {
+                "claim_id": verdict.claim_id,
+                "text": claim.text,
+                "question": verdict.question,
+                "question_priority": verdict.question_priority,
+                "status_weight": status_weight,
+                "gap_weight": gap_weight,
+                "status": verdict.status.value,
+                "confidence": verdict.confidence.value,
+            }
+        )
+
+    if args.json:
+        _write_json(Path(args.json), {"questions": rows, "total": len(rows)})
 
     return 0
 

@@ -1,12 +1,25 @@
-"""CLI 子命令测试（C-CLI@2）：三种退出码与报告落盘。"""
+"""CLI 子命令测试（C-CLI@2 / C-CLI@3）：三种退出码、报告落盘与问题分值拆解。"""
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 
 from gap_engine import cli
 
 SPEC_TEXT = "- 支持 Excel 导出\n"
+QUESTION_LINE = re.compile(r"^\[\d+\] .+ → .+（状态 \w+ \+\d+，缺口 \w+ \+\d+）$")
+QUESTION_KEYS = [
+    "claim_id",
+    "text",
+    "question",
+    "question_priority",
+    "status_weight",
+    "gap_weight",
+    "status",
+    "confidence",
+]
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -123,6 +136,105 @@ def test_spec_argument_is_required(tmp_path: Path, capsys) -> None:
     captured = capsys.readouterr()
     assert code == 2
     assert "--spec" in captured.err
+
+
+def _write_readme(repo: Path) -> None:
+    (repo / "README.md").write_text(
+        "- 支持 Excel 导出\n- 支持 CSV 导出\n", encoding="utf-8"
+    )
+
+
+def test_questions_spec_prints_breakdown_and_json(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path)
+    out = tmp_path / "nested" / "questions.json"
+
+    code = cli.main(
+        [
+            "questions",
+            str(repo),
+            "--spec",
+            str(spec),
+            "--top",
+            "2",
+            "--json",
+            str(out),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.err == ""
+    lines = captured.out.splitlines()
+    assert lines
+    assert all(QUESTION_LINE.match(line) for line in lines)
+
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["total"] == len(lines) == len(payload["questions"])
+    for row in payload["questions"]:
+        assert list(row) == QUESTION_KEYS
+        assert row["status_weight"] + row["gap_weight"] >= 2
+
+
+def test_questions_readme_mode_is_idempotent(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    _write_readme(repo)
+
+    first = cli.main(["questions", str(repo)])
+    first_out = capsys.readouterr()
+    second = cli.main(["questions", str(repo)])
+    second_out = capsys.readouterr()
+
+    assert first == 0 and second == 0
+    assert first_out.out == second_out.out
+    lines = first_out.out.splitlines()
+    assert lines
+    assert all(QUESTION_LINE.match(line) for line in lines)
+
+
+def test_questions_top_is_clamped_to_at_least_one(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path)
+
+    for top in ("0", "-3"):
+        code = cli.main(
+            ["questions", str(repo), "--spec", str(spec), "--top", top]
+        )
+        captured = capsys.readouterr()
+        assert code == 0
+        assert len(captured.out.splitlines()) == 1
+
+
+def test_questions_missing_spec_returns_two(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    missing = tmp_path / "absent.md"
+
+    code = cli.main(["questions", str(repo), "--spec", str(missing)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert f"spec 文件不存在：{missing}" in captured.err
+
+
+def test_questions_empty_spec_returns_two(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path, "# 只有标题\n\n一段普通说明，没有列表条目。\n")
+
+    code = cli.main(["questions", str(repo), "--spec", str(spec)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "需求清单里没有找到条目" in captured.err
+
+
+def test_questions_missing_repo_returns_one(tmp_path: Path, capsys) -> None:
+    spec = _spec(tmp_path)
+
+    code = cli.main(["questions", str(tmp_path / "nope"), "--spec", str(spec)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "仓库路径不存在" in captured.err
 
 
 def test_unknown_command_returns_two(capsys) -> None:
