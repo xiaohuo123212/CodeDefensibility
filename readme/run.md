@@ -90,7 +90,26 @@ python tools/measure_prevalence.py --analysis <多份 analyze --json 产物> --o
 
 **纪律**：报告的默认值来自先验表，标「先验」；跑过上述命令后的数值才是实测，标「实测」。两者不得混用；未实测时数值必须写成 `N=?` 并标「先验」，禁止把先验值说成实测。
 
-## 7. 打包成提交包
+## 7. 回执评分（七指标）
+
+需求提出人按条目判「对 / 错 / 说不清」并把回执整理成 JSONL 后，用 `gap score` 一次算出七个指标。每行都带分母 N；**漏报率与误报率分开成行**，不合并。
+
+```bash
+# 1) 先产出可被 score 读取的分析结果
+gap analyze <repo> --json out/analysis.json
+
+# 2) 回执 JSONL：每行一个对象
+#    {"claim_id": "...", "author_verdict": "对|错|说不清", "author_evidence": "file:line 或留空"}
+gap score --analysis out/analysis.json --receipts receipts.jsonl --out reports/score.md --json out/score.json
+```
+
+> 注意字段名：回执里的 `claim_id` 要填 `analysis.json` 中 `claims[].id` 的值（如 `c01`），不是 `claims[]` 里的其他字段名。填错的回执会被静默跳过，表现为 `n_valid` 小于 `n_receipts`。
+
+输出顺序固定：认可率 / 定位率 / 漏报率（假阴性）/ 误报率（假阳性）/ 无法证伪异议率 / 说不清率 / 未覆盖率。
+
+分母为 0 的指标记 `0.0` 并如实显示 `N=0`——**没有回执就不出数字，不估算**。`--receipts` 省略时七行仍会打印（此时依赖回执的指标均为 `N=0`）。非法行（缺 `claim_id`、裁决值不在三选一内）会被跳过，不中断。
+
+## 8. 打包成提交包
 
 在仓库根（含 `ppt/ video/ codearts_proof/ readme/ gap-engine/` 的那一层）执行：
 

@@ -24,12 +24,12 @@
 | `contradicted` | 代码里有**显式否定声明**，与要求不一致 | `file:line` 定位 |
 | `no_evidence` | 我找过这些地方，没找到 | `search_trace`（查过几类、几处） |
 
-判定域只有 `performance` / `concurrency` / `feature` / `testing` 四类；其余类型标"不判定"并写明原因。
+判定域只有 `performance` / `concurrency` / `feature` / `testing` 四类；其余类型标"不判定"并写明原因。七类识别与四类判定的书面理由、以及「识别七类为什么只判四类」的答辩口径见 [`contract/scope.md`](../gap-engine/contract/scope.md)。
 
 ## 五份文档
 
 - [install.md](install.md) —— 环境与安装（Python ≥ 3.11，零运行时依赖）
-- [run.md](run.md) —— 三种运行方式：`gap spec` / `gap analyze` / `python -m demo.app`
+- [run.md](run.md) —— 四种运行方式：`gap spec` / `gap analyze` / `gap score` / `python -m demo.app`，外加打包命令
 - [oss.md](oss.md) —— 开源组件与实际依赖清单
 - [codearts.md](codearts.md) —— 码道在哪些环节被使用，以及没被使用的部分
 
