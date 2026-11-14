@@ -14,3 +14,4 @@ venv/
 .arts/
 .DS_Store
 Thumbs.db
+.tmp/

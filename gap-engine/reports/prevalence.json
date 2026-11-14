@@ -1,0 +1,39 @@
+{
+  "performance": {
+    "n_claims": 1,
+    "n_prevalent": 1,
+    "prevalence": 1.0
+  },
+  "concurrency": {
+    "n_claims": 0,
+    "n_prevalent": 0,
+    "prevalence": 0.0
+  },
+  "architecture": {
+    "n_claims": 0,
+    "n_prevalent": 0,
+    "prevalence": 0.0
+  },
+  "feature": {
+    "n_claims": 2,
+    "n_prevalent": 2,
+    "prevalence": 1.0
+  },
+  "scale": {
+    "n_claims": 0,
+    "n_prevalent": 0,
+    "prevalence": 0.0
+  },
+  "testing": {
+    "n_claims": 0,
+    "n_prevalent": 0,
+    "prevalence": 0.0
+  },
+  "security": {
+    "n_claims": 0,
+    "n_prevalent": 0,
+    "prevalence": 0.0
+  },
+  "_source": "measured",
+  "_n_projects": 10
+}

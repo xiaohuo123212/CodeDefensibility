@@ -67,7 +67,7 @@
 - 入站适配（Markdown → `Claim` schema）→ **Claimer**（抽条目 + 七类分类）→ **Prober**（9 个规则抽取器，含 `artifact` / `negation`）→ **Matcher**（三态 + 置信度）→ **Renderer**（报告）
 - 三态：`supported` / `contradicted` / `no_evidence`（**没有第四态**；"部分支持"只是 `no_evidence` 的措辞）
 - 证据单元带 `file:line`；搜不到也要输出 **`search_trace`**（查过哪几类、扫过几处、命中几处）
-- Agent 现状（口径统一）：**7 个 Agent 位 = 5 个已实现（Claimer / Prober / Matcher / Challenger（规则版）/ Renderer）+ 2 个 roadmap（Healer / Verifier）**；`baseline` 先验是 Matcher 内部机制，不占 Agent 位（其数值为**先验值**，未实测；实测值由 `tools/measure_prevalence.py` 产出后标「实测，N=?」，两者不得混用）
+- Agent 现状（口径统一）：**7 个 Agent 位 = 5 个已实现（Claimer / Prober / Matcher / Challenger（规则版）/ Renderer）+ 2 个 roadmap（Healer / Verifier）**；`baseline` 先验是 Matcher 内部机制，不占 Agent 位（其数值为**先验值**；已完成一轮 GitHub 实测：10 个公开仓库聚合、判定域可判定声称 **N=3**（performance 1 + feature 2）；`concurrency` / `testing` 属判定域但本批未抽到可判定声称（N=0，属样本现象），`architecture` / `scale` / `security` 属不判定域、不纳入实测，见 `gap-engine/reports/prevalence-sample.md`；先验与实测不得混用）
 - 真值由**需求提出人**判（对 / 错 / 说不清），不是我们自己标
 
 引用产物：`对账引擎/施工图-对账引擎.md` §0–§1.6
@@ -147,7 +147,7 @@
 - 定位率 **`N=?`**（目标 ≥90%，分母 = 断言型结论）
 - 漏报率 **`N=?`**（≤20%，主动报）｜误报率 **`N=?`**（≤10%，主动报）——**两个必须分开报**
 - 无法证伪异议率 / 说不清率 / 未覆盖率 **`N=?`**（如实报，不设目标）
-- 普遍性（prevalence）：默认取**先验值**（`baseline.PREVALENCE`，标「先验」）；实测为 **`N=?`**（跑过 `tools/measure_prevalence.py` 后填入，标「实测」）——两者不得混用
+- 普遍性（prevalence）：默认取**先验值**（`baseline.PREVALENCE`，标「先验」）；已有实测：10 个公开仓库聚合、判定域可判定声称 **N=3**（performance 1 + feature 2，取值以 `reports/prevalence.json` 为准）；`concurrency` / `testing` 本批 N=0 属样本未覆盖，三类不判定域（architecture / scale / security）不纳入实测、不得引用为「实测 0%」，详见 `gap-engine/reports/prevalence-sample.md`——先验与实测不得混用
 
 > **所有 `N=?`：待 5 份需求清单回执后填入，禁止估算。** 一个数字后面必须带 N；有效回执不是 25 就如实写。
 

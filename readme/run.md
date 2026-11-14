@@ -80,6 +80,8 @@ bash build.sh
 | 先验表 | `gap-engine/src/gap_engine/baseline.py` 的 `PREVALENCE`（人对同类项目的经验值） | 「先验」——报告局限段固定写明「缺口判定依赖先验普遍性表（PREVALENCE），尚未用同类项目实测」 |
 | 实测 | 多份 `gap analyze --json` 产物聚合出的 `reports/prevalence.json`（顶层 `"_source": "measured"`，另带 `_n_projects`） | 「实测」——必须同时给出样本数 N |
 
+**实测的类别边界**：只有 `performance` / `concurrency` / `feature` / `testing` 四类可判定（见 `gap-engine/contract/scope.md` 的判定域）。`architecture` / `scale` / `security` 属不判定域，**不纳入实测**——它们的 `n_claims` 恒为 0，`prevalence` 字段不具含义，对外**不得**引用为「实测 0%」。当前实测结果、样本清单与两轮对照见 `gap-engine/reports/prevalence-sample.md`。
+
 复算命令（在 `gap-engine/` 目录执行；`--analysis` 可传多份 `--json` 产物，每个被测项目一份）：
 
 ```bash
