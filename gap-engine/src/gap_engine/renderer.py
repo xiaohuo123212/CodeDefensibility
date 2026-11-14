@@ -28,7 +28,7 @@ SPEC_PRECHECK_HEADING = "## 需求可判定性预检"
 
 _LIMITATIONS = [
     "- 本批只跑单轮检索，多轮换假设未启用。",
-    "- 本批不产出「有反证」：没有充分反证时不下断言。",
+    "- 只把显式否定声明当反证：没有显式否定时不下断言。",
     "- 缺口判定依赖先验普遍性表（PREVALENCE），尚未用同类项目实测。",
     "- 规则优先，LLM 默认关闭；分类歧义未做消解。",
     "- 报告只反映我查过的位置，不等于你没做过。",
@@ -64,6 +64,14 @@ def _label_of(verdict: Verdict) -> str:
     return reason.rsplit(marker, 1)[1].strip() if marker in reason else ""
 
 
+def _conclusion_of(verdict: Verdict) -> str:
+    if verdict.status is Status.contradicted:
+        return "代码里有反证，与要求不一致"
+    label = _label_of(verdict)
+    text = STATUS_CN.get(verdict.status, "")
+    return f"{text}（{label}）" if label else text
+
+
 def _overview_line(verdicts: list[Verdict], unit: str = "声称") -> str:
     trace = [probe for verdict in verdicts for probe in verdict.search_trace]
     total = sum(probe.scanned for probe in trace)
@@ -95,10 +103,7 @@ def _probe_groups(verdict: Verdict) -> tuple[list[str], list[str]]:
 def _claim_block(claim: Claim, verdict: Verdict) -> list[str]:
     hit_lines, miss_lines = _probe_groups(verdict)
 
-    label = _label_of(verdict)
-    conclusion = STATUS_CN.get(verdict.status, "")
-    if label:
-        conclusion = f"{conclusion}（{label}）"
+    conclusion = _conclusion_of(verdict)
 
     classes = len(verdict.search_trace)
     scanned = sum(probe.scanned for probe in verdict.search_trace)
@@ -117,6 +122,9 @@ def _claim_block(claim: Claim, verdict: Verdict) -> list[str]:
         f"结论：{conclusion}",
         "",
     ]
+
+    if verdict.status is Status.contradicted and verdict.locator is not None:
+        lines += [f"- 定位：{verdict.locator.as_str()}", ""]
 
     if verdict.rounds > 1:
         lines += [

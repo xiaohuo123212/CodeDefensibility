@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import gap_engine.renderer as renderer
+from gap_engine.matcher import CONTRADICTED_FIX, CONTRADICTED_QUESTION_TEMPLATE
 from gap_engine.pipeline import analyze_repo, analyze_spec
 from gap_engine.renderer import STATUS_CN, render, render_spec
 from gap_engine.schema import (
@@ -39,7 +40,9 @@ def _verdict(
         claim_id=cid,
         status=status,
         confidence=Confidence.medium if status is Status.no_evidence else Confidence.high,
-        locator=Locator("app.py", 1) if status is Status.supported else None,
+        locator=Locator("app.py", 1)
+        if status in (Status.supported, Status.contradicted)
+        else None,
         coverage=coverage,
         evidence_ids=[],
         reason="",
@@ -311,7 +314,7 @@ def test_concurrency_overview_states_total_and_dedup_classes(tmp_path: Path) -> 
 
     assert len(verdicts) == 1
     assert (
-        _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（1 条声称，5 类探测项）"
+        _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（1 条声称，6 类探测项）"
     )
 
 
@@ -325,7 +328,7 @@ def test_spec_overview_is_total_of_per_claim_efforts(tmp_path: Path) -> None:
 
     assert len(analysis.verdicts) == 4
     assert (
-        _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（4 条需求，9 类探测项）"
+        _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（4 条需求，10 类探测项）"
     )
 
 def test_claim_block_puts_criteria_between_fix_and_audit_effort(tmp_path: Path) -> None:
@@ -577,4 +580,37 @@ def test_single_round_report_has_no_switch_line(tmp_path: Path) -> None:
     assert all(v.rounds == 1 for v in verdicts)
     assert "换假设：" not in text
     assert "- 本批只跑单轮检索，多轮换假设未启用。" in text.split("## 局限")[1]
-    assert _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（1 条声称，4 类探测项）"
+    assert _overview_of(text) == f"#### 查过 {_audit_effort_sum(text)} 处（1 条声称，5 类探测项）"
+
+def test_claim_block_contradicted_uses_fixed_conclusion_and_locator(tmp_path: Path) -> None:
+    trace = [
+        SearchProbe(probe="否定/未实现声明", target="t", scanned=3, hits=1, where=["app.py:9"]),
+    ]
+    verdict = _verdict("c01", trace, status=Status.contradicted, coverage=Coverage.full)
+    verdict.reason = "代码里有反证：导出功能暂未实现；缺口：该改"
+    verdict.question = CONTRADICTED_QUESTION_TEMPLATE.format(text="支持 Excel 导出")
+    verdict.fix = CONTRADICTED_FIX
+
+    out = render([verdict], [_claim("c01", "支持 Excel 导出")], tmp_path / "report.md", "repo")
+    text = out.read_text(encoding="utf-8")
+
+    assert "结论：代码里有反证，与要求不一致" in text
+    assert "（该改）" not in text
+    assert "- 定位：app.py:1" in text
+    assert text.index("结论：") < text.index("- 定位：") < text.index("会被问：")
+    assert CONTRADICTED_FIX in text
+    assert CONTRADICTED_QUESTION_TEMPLATE.format(text="支持 Excel 导出") in text
+
+
+def test_contradicted_block_has_no_rounds_line(tmp_path: Path) -> None:
+    trace = [SearchProbe(probe="否定/未实现声明", target="t", scanned=1, hits=1, where=["app.py:9"])]
+    out = render(
+        [_verdict("c01", trace, status=Status.contradicted)],
+        [_claim("c01", "支持 Excel 导出")],
+        tmp_path / "report.md",
+        "repo",
+    )
+    text = out.read_text(encoding="utf-8")
+
+    assert "换假设：" not in text
+    assert "- 定位：app.py:1" in text

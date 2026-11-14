@@ -3,23 +3,23 @@
 对账引擎：输入一份需求清单（或 README / 交付说明里的自我声称）和一个代码仓库，
 逐条对账成 `supported` / `contradicted` / `no_evidence` 三态结论，并给出可复现的证据定位、追问与补齐建议。
 
-## 当前状态（D4）
+## 当前状态（D5）
 
 **已实现**：
 
 - 数据模型 `Claim` / `Evidence` / `Verdict` / `SearchProbe` / `Locator`，含 `authority`（`external` / `self`）与三态不变量；`Verdict.rounds` 是**真实字段**（实际跑过的检索轮数，不再是硬编码 `1`）
-- 8 个规则抽取器（`deps` / `entry` / `concurrency` / `tests` / `bench` / `artifact` / `config` / `structure`）
+- 9 个规则抽取器（`deps` / `entry` / `concurrency` / `tests` / `bench` / `artifact` / `negation` / `config` / `structure`）
 - Claimer（抽声称 + 七类分类）、Prober、Matcher（三态判定）、**Challenger（规则版，见下节）**、Renderer（markdown 报告）
 - CLI：`gap analyze`、`gap questions`、`gap spec`
 - 需求清单解析 + 需求可判定性预检（无法验收的条目逐条给改写建议）
 - 报告两段：`## 需求可判定性预检`（共 N 条 / D 条可判定 / K 条无法验收）、`## 项目实际是什么`（规模 / 入口 / 依赖 / 测试）
-- **多轮换假设检索**（`prober.ALTERNATE_PLANS` + `pipeline` 挑战循环）：`performance` / `concurrency` 第 2 轮加查「压测结果文件」（`artifact` 抽取器），`testing` 第 2 轮加查「覆盖率产物」；循环只升不降、证据与轨迹累加、`max_rounds` 钳制 1..3、第 1 轮已 `supported` 的条目不进循环；报告逐条段出现 `换假设：N 轮（第 1 轮查预设来源，其后换假设重搜）`
+- **多轮换假设检索**（`prober.ALTERNATE_PLANS` + `pipeline` 挑战循环）：`performance` / `concurrency` 第 2 轮加查「压测结果文件」（`artifact` 抽取器），`testing` 第 2 轮加查「覆盖率产物」；循环只升不降、证据与轨迹累加、`max_rounds` 钳制 1..3、第 1 轮已 `supported` 或已 `contradicted` 的直接返回（**只有 `no_evidence` 进第 2 轮**）；报告逐条段出现 `换假设：N 轮（第 1 轮查预设来源，其后换假设重搜）`
+- **`contradicted`**（三态之一，已产出）：只认显式否定声明（`extractors/negation.py` 的 `NEGATION_MARKERS`），必须与需求关键词相关，且必须能贴出 `file:line`——贴不出就降回 `no_evidence`；反证优先于支持证据，被推翻的支持痕迹条数写进 `reason`；第 1 轮即定论、不进挑战循环（`rounds` 恒为 1）。产物证据：`reports/fx-contradicted.md`（`结论：代码里有反证，与要求不一致`、`- 定位：app.py:9`）
 
 **未实现**（roadmap，见报告"局限"段）：
 
 - `--claims --spec` 双模式（同时读需求清单与自我声称）
 - Healer / Verifier 生成补齐物并跑通
-- `contradicted` 产出（没有充分反证时一律不下断言）
 - CI 门禁、IDE 悬浮
 
 ## Challenger（规则版）——已实现的部分与边界
@@ -30,7 +30,7 @@
 
 - 轮次策略是**表驱动、有限、可枚举**的（`ALTERNATE_PLANS`，每类至多 1 个备用假设，硬上限 3 轮），**不做 LLM 反证、不做多 Agent 对话**——否则同一仓库两次跑会给出不同轨迹，`search_trace` 就失去"可复核"的意义
 - 只针对 `performance` / `concurrency` / `testing` 三类定义第 2 轮；`feature` / 架构 / 规模 / 安全类总轮数恒为 1
-- 只升不降：已 `supported` 的直接返回，不进入循环；认为误报时只能提交证据复核，不能直接降级
+- 只升不降：第 1 轮已 `supported` **或已 `contradicted`** 的直接返回（只有 `no_evidence` 进第 2 轮）；认为误报时只能提交证据复核，不能直接降级
 
 **产物证据**：`reports/fx-challenge.md` —— `换假设：2 轮（第 1 轮查预设来源，其后换假设重搜）`、证据定位 `loadtest/report.log:2`、结论从第 1 轮 `no_evidence` 升为 `supported`。
 
@@ -47,7 +47,7 @@ gap-engine/
 │   ├── claimer.py           # 自我声称抽取 + 七类分类
 │   ├── spec.py              # 需求清单解析 + 可判定性预检 + 转 Claim(authority=external)
 │   ├── index.py             # 仓库索引（文件读取与缓存）
-│   ├── extractors/          # 8 个规则抽取器，各自独立可测（含 artifact：结果/产物文件里的测量痕迹）
+│   ├── extractors/          # 9 个规则抽取器，各自独立可测（含 artifact：结果/产物文件里的测量痕迹；negation：显式否定声明）
 │   ├── prober.py            # ALTERNATE_PLANS + 分轮检索（plan/run 带轮次）
 │   ├── matcher.py           # 三态判定 + 置信度（rounds 透传）
 │   ├── pipeline.py          # analyze_repo / analyze_spec 编排 + 挑战循环（max_rounds 钳制）

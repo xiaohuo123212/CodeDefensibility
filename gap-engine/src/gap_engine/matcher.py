@@ -1,13 +1,16 @@
-"""三态判定与追问/补齐文案（C-MATCHER@2）。
+"""三态判定与追问/补齐文案（C-MATCHER@2 / C-MATCHER@4）。
 
-本批永不产出 ``contradicted``：没有充分反证时只下 ``no_evidence``。
-三态只由证据决定，``search_trace`` 仅用于 coverage 判定与报告。
+``contradicted`` 只在「有显式否定声明、与需求关键词相关、且有可用行号」时产出；
+其余情况仍只下 ``no_evidence``。三态只由证据决定，``search_trace`` 仅用于 coverage 判定与报告。
 feature 类额外要求证据与需求关键词相关；定位选点一律避开依赖声明。
 """
 
 from __future__ import annotations
 
+import re
+
 from .baseline import is_prevalent
+from .extractors.negation import NEGATION_MARKERS
 from .schema import (
     Claim,
     ClaimType,
@@ -70,6 +73,31 @@ DEPENDENCY_DECLARATIONS: tuple[str, ...] = (
 
 _ABILITY_TYPES = (ClaimType.performance, ClaimType.concurrency)
 
+CLAIM_STOPWORDS: tuple[str, ...] = (
+    "支持",
+    "需要",
+    "必须",
+    "应该",
+    "能够",
+    "可以",
+    "实现",
+    "功能",
+    "系统",
+    "用户",
+    "我们",
+    "以及",
+    "并且",
+    "同时",
+    "保证",
+    "提供",
+    "一个",
+    "进行",
+)
+
+_WORD_RE = re.compile(r"[a-z0-9_]+")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
+_STOPWORD_RE = re.compile("|".join(CLAIM_STOPWORDS))
+
 _STRENGTH_RANK: dict[Strength, int] = {
     Strength.high: 3,
     Strength.medium: 2,
@@ -77,6 +105,13 @@ _STRENGTH_RANK: dict[Strength, int] = {
 }
 
 _COVERAGE_ARTIFACT_HINTS = (".coverage", "coverage.xml", "coverage.json", "coverage.csv", "htmlcov")
+
+
+CONTRADICTED_QUESTION_TEMPLATE = "「{text}」的要求与代码里的否定声明冲突，最终以哪边为准？"
+CONTRADICTED_FIX = (
+    "代码与要求不一致：先确认这条要求是否仍然有效；"
+    "有效就改实现，无效就改需求文档，不要两边都留着。"
+)
 
 
 QUESTION_TEMPLATES: dict[ClaimType, str] = {
@@ -132,9 +167,32 @@ def feature_terms(text: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
+def claim_terms(text: str) -> tuple[str, ...]:
+    """从需求文本提取显著词：英文词取 ≥3 字符，中文按停用词切分后取 2–6 字片段。"""
+    terms: list[str] = []
+
+    for word in _WORD_RE.findall(text.lower()):
+        if len(word) >= 3 and word not in terms:
+            terms.append(word)
+
+    for chunk in _CJK_RE.findall(text):
+        for piece in _STOPWORD_RE.split(chunk):
+            if len(piece) > 6:
+                piece = piece[:6]
+            if len(piece) >= 2 and piece not in terms:
+                terms.append(piece)
+
+    return tuple(terms)
+
+
 def _mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
     haystack = f"{evidence.file} {evidence.snippet}".lower()
     return any(term in haystack for term in terms)
+
+
+def _is_negation(evidence: Evidence) -> bool:
+    haystack = (evidence.snippet or "").lower()
+    return any(marker in haystack for marker in NEGATION_MARKERS)
 
 
 def _is_dependency_declaration(evidence: Evidence) -> bool:
@@ -221,6 +279,27 @@ def judge(
             rounds,
         )
 
+    terms = claim_terms(claim.text)
+    if terms:
+        negations = [e for e in relevant if _is_negation(e) and _mentions(e, terms)]
+        anchor = _strongest([e for e in negations if e.line is not None])
+        if anchor is not None:
+            supports = [e for e in relevant if not _is_negation(e)]
+            reason = f"代码里有反证：{_short(anchor.snippet)}"
+            if supports:
+                reason += f"（另有 {len(supports)} 处支持痕迹，被反证推翻）"
+            return _verdict(
+                claim,
+                Status.contradicted,
+                Confidence.high,
+                _locator(anchor),
+                _coverage(trace),
+                relevant,
+                reason,
+                trace,
+                rounds,
+            )
+
     if claim.type in _ABILITY_TYPES:
         bench = [e for e in relevant if _kind(e) is EvidenceKind.bench]
         if not bench:
@@ -302,12 +381,16 @@ def gap_label(
 ) -> str:
     if verdict.status is Status.supported:
         return ""
+    if verdict.status is Status.contradicted:
+        return "该改"
     if verdict.status is Status.no_evidence and is_prevalent(claim.type, prevalence):
         return "该补"
     return "行业常态"
 
 
 def question(claim: Claim, verdict: Verdict) -> str:
+    if verdict.status is Status.contradicted:
+        return CONTRADICTED_QUESTION_TEMPLATE.format(text=_short(claim.text))
     template = QUESTION_TEMPLATES[claim.type]
     return template.format(text=_short(claim.text))
 
@@ -315,4 +398,6 @@ def question(claim: Claim, verdict: Verdict) -> str:
 def fix(claim: Claim, verdict: Verdict) -> str:
     if verdict.status is Status.supported:
         return "无需补齐：证据已足够。"
+    if verdict.status is Status.contradicted:
+        return CONTRADICTED_FIX
     return FIX_TEMPLATES[claim.type]

@@ -59,8 +59,8 @@ def _judge_one(claim: Claim, index: RepoIndex, max_rounds: int) -> Verdict:
     trace = list(probes)
     verdict = matcher.judge(claim, evidence, trace, rounds=1)
 
-    # 只升不降：第 1 轮已有支持证据就不进循环
-    if verdict.status is not Status.supported:
+    # 只有没找到证据才换假设：supported 与 contradicted 都在第 1 轮即定论
+    if verdict.status is Status.no_evidence:
         available = 1 + len(prober.ALTERNATE_PLANS.get(claim.type, ()))
         for n in range(2, min(cap, available) + 1):
             more_probes, more = prober.run(claim, index, n)

@@ -389,6 +389,7 @@ REPORT_CASES = (
     ("fx-testing", "analyze", ""),
     ("fx-spec", "spec", "requirements.md"),
     ("fx-challenge", "spec", "requirements.md"),
+    ("fx-contradicted", "spec", "requirements.md"),
 )
 
 
@@ -409,3 +410,67 @@ def test_committed_reports_match_cli_output(name: str, mode: str, spec_name: str
     assert out.read_text(encoding="utf-8") == committed.read_text(encoding="utf-8"), (
         f"reports/{name}.md 与当前 CLI 输出不一致，请用 CLI 重新生成"
     )
+
+@pytest.mark.parametrize("name,mode,spec_name", REPORT_CASES)
+def test_report_overview_total_equals_effort_sum(
+    name: str, mode: str, spec_name: str, tmp_path
+) -> None:
+    out = tmp_path / f"{name}.md"
+    assert cli.main(_cli_report_argv(name, mode, spec_name, out)) == 0
+    text = out.read_text(encoding="utf-8")
+
+    total = int(re.search(r"#### 查过 (\d+) 处", text).group(1))
+    efforts = sum(int(n) for n in re.findall(r"audit effort：\d+ 类 (\d+) 处", text))
+    assert total == efforts, name
+
+
+CONTRADICTED = FIXTURES / "fx-contradicted"
+
+
+def _contradicted_pair(needle: str):
+    analysis = analyze_spec(
+        CONTRADICTED,
+        _read("fx-contradicted", "requirements.md"),
+        spec_path="requirements.md",
+    )
+    for claim, verdict in zip(analysis.claims, analysis.verdicts):
+        if needle in claim.text:
+            return claim, verdict
+    raise AssertionError(f"fx-contradicted 未抽出包含 {needle!r} 的需求")
+
+
+def test_fx_contradicted_dir_has_fixed_files() -> None:
+    for name in ("README.md", "requirements.md", "requirements.txt", "app.py", "EXPECTED.md"):
+        assert (CONTRADICTED / name).is_file(), name
+
+
+def test_fx_contradicted_export_is_contradicted_with_locator() -> None:
+    claim, verdict = _contradicted_pair("Excel 导出")
+    assert claim.type is ClaimType.feature
+    assert verdict.status is Status.contradicted
+    assert verdict.rounds == 1
+    assert verdict.locator is not None
+    assert verdict.locator.file == "app.py"
+    lines = _read("fx-contradicted", "app.py").splitlines()
+    assert "raise NotImplementedError" in lines[verdict.locator.line - 1]
+    assert "反证" in verdict.reason
+
+
+def test_fx_contradicted_login_stays_supported_single_round() -> None:
+    claim, verdict = _contradicted_pair("用户登录")
+    assert claim.type is ClaimType.feature
+    assert verdict.status is Status.supported
+    assert verdict.rounds == 1
+
+
+def test_fx_contradicted_report_block_has_no_rounds_line(tmp_path) -> None:
+    out = tmp_path / "fx-contradicted.md"
+    assert render_spec_to(CONTRADICTED, CONTRADICTED / "requirements.md", out) == out
+    text = out.read_text(encoding="utf-8")
+    block = text.split("### 支持 Excel 导出")[1].split("### 用户登录")[0]
+
+    assert "结论：代码里有反证，与要求不一致" in block
+    assert "- 定位：app.py:" in block
+    assert "换假设：" not in block
+    assert "该补什么：代码与要求不一致" in block
+    assert "最终以哪边为准" in block

@@ -52,7 +52,7 @@ def _line_text(index: RepoIndex, p: Path, line: int, fallback: str = "") -> str:
     return fallback
 
 
-from . import artifact, bench, concurrency, config, deps, entry, structure, tests  # noqa: E402
+from . import artifact, bench, concurrency, config, deps, entry, negation, structure, tests  # noqa: E402
 
 EXTRACTORS: dict[str, Callable[[RepoIndex], list[Evidence]]] = {
     "structure": structure.extract,
@@ -63,6 +63,7 @@ EXTRACTORS: dict[str, Callable[[RepoIndex], list[Evidence]]] = {
     "bench": bench.extract,
     "config": config.extract,
     "artifact": artifact.extract,
+    "negation": negation.extract,
 }
 
 __all__ = ["EXTRACTORS"]

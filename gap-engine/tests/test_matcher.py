@@ -1,17 +1,22 @@
-"""三态判定、缺口标签与追问/补齐文案的单元测试（C-MATCHER@2）。"""
+"""三态判定、缺口标签与追问/补齐文案的单元测试（C-MATCHER@2 / C-MATCHER@4）。"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 import gap_engine.matcher as matcher_module
+from gap_engine.extractors.negation import NEGATION_MARKERS
 from gap_engine.matcher import (
+    CONTRADICTED_FIX,
+    CONTRADICTED_QUESTION_TEMPLATE,
     FIX_TEMPLATES,
     LOCAL_COMPLETION_PROMPT,
     QUESTION_TEMPLATES,
     FEATURE_TERM_GROUPS,
     _is_dependency_declaration,
+    _is_negation,
     _locator_evidence,
+    claim_terms,
     feature_terms,
     fix,
     gap_label,
@@ -133,7 +138,7 @@ def test_feature_claim_with_evidence_is_supported() -> None:
     assert verdict.rounds == 1
 
 
-def test_judge_never_returns_contradicted() -> None:
+def test_judge_without_negation_markers_keeps_original_statuses() -> None:
     cases = [
         judge(_claim(ClaimType.feature), [], _trace()),
         judge(
@@ -347,3 +352,89 @@ def test_rounds_defaults_to_one_and_is_passed_through() -> None:
 def test_matcher_has_no_hardcoded_rounds() -> None:
     source = Path(matcher_module.__file__).read_text(encoding="utf-8")
     assert "rounds=1" not in source
+
+
+def test_claim_terms_keeps_significant_words() -> None:
+    assert claim_terms("支持 Excel 导出") == ("excel", "导出")
+    assert claim_terms("支持 500 并发用户") == ("500", "并发")
+    assert claim_terms("支持多语言") == ("多语言",)
+    assert claim_terms("支持超长中文词组测试") == ("超长中文词组",)
+    assert claim_terms("支持") == ()
+    assert claim_terms("") == ()
+
+
+def test_is_negation_reuses_extractor_markers() -> None:
+    assert matcher_module.NEGATION_MARKERS is NEGATION_MARKERS
+
+    assert _is_negation(_ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 1, "导出功能暂未实现"))
+    assert _is_negation(_ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 2, "Not Supported"))
+    assert not _is_negation(_ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 3, '@app.get("/export")'))
+    assert not _is_negation(_ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 4, ""))
+
+
+def test_contradiction_with_supporting_evidence_is_contradicted() -> None:
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    support = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5, '@app.get("/export")')
+    negation = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 9, "导出功能暂未实现")
+
+    verdict = judge(claim, [support, negation], _trace())
+
+    assert verdict.status is Status.contradicted
+    assert verdict.confidence is Confidence.high
+    assert verdict.locator is not None
+    assert (verdict.locator.file, verdict.locator.line) == ("app.py", 9)
+    assert "反证" in verdict.reason
+    assert "另有 1 处支持痕迹" in verdict.reason
+    assert verdict.evidence_ids == [support.id, negation.id]
+
+
+def test_negation_without_usable_line_falls_back_to_original_flow() -> None:
+    claim = _claim(ClaimType.concurrency, "支持 500 并发用户")
+    negation = Evidence(
+        id="ev-negation-001",
+        kind=EvidenceKind.code,
+        file="app.py",
+        line=None,  # type: ignore[arg-type]
+        snippet="500 并发暂未实现",
+        supports=[ClaimType.concurrency],
+        strength=Strength.high,
+    )
+
+    verdict = judge(claim, [negation], _trace())
+
+    assert verdict.status is not Status.contradicted
+    assert verdict.status is Status.no_evidence
+    assert "有配置，无测量" in verdict.reason
+
+
+def test_unrelated_negation_does_not_contradict() -> None:
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    support = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5, '@app.get("/export")')
+    unrelated = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 11, "不支持 Windows 7")
+
+    verdict = judge(claim, [support, unrelated], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.line == 5
+
+
+def test_contradicted_labels_and_texts() -> None:
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    negation = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 9, "导出功能暂未实现")
+
+    verdict = judge(claim, [negation], _trace())
+
+    assert verdict.status is Status.contradicted
+    assert gap_label(claim, verdict) == "该改"
+    assert fix(claim, verdict) == CONTRADICTED_FIX
+    assert CONTRADICTED_FIX == (
+        "代码与要求不一致：先确认这条要求是否仍然有效；"
+        "有效就改实现，无效就改需求文档，不要两边都留着。"
+    )
+    assert question(claim, verdict) == CONTRADICTED_QUESTION_TEMPLATE.format(text=claim.text)
+
+
+def test_matcher_docstring_no_longer_promises_no_contradicted() -> None:
+    source = Path(matcher_module.__file__).read_text(encoding="utf-8")
+    assert "永不产出" not in source

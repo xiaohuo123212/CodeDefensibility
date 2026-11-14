@@ -223,7 +223,7 @@ gap analyze <repo> --claims --spec <requirements.md>
 - 主渠道：**需求核对报告**（`gap spec`，CLI + 极简页面）
 - 副渠道：**面试自检**（`gap analyze` / `gap questions`，复用同一引擎）
 - Agent 口径（对外统一）：**7 个 Agent 位 = 5 个已实现（Claimer / Prober / Matcher / Challenger（规则版）/ Renderer）+ 2 个 roadmap（Healer / Verifier）**；**`baseline` 先验是 Matcher 的内部机制，不占 Agent 位**
-- roadmap（**架构已支持，未实现**）：**双模式（`--claims --spec` 同时读）**、Healer / Verifier 生成闭环、`contradicted` 产出、CI 门禁、IDE 悬浮、**SARIF 出站**（`~1 天`，理由见上：语义错位，缺证据 ≠ 缺陷）、**OpenSLO 入站**（商业方向，非比赛方向）、**`gap explain <问题>`**（**需要调用图，不是现有索引的副产物**）
+- roadmap（**架构已支持，未实现**）：**双模式（`--claims --spec` 同时读）**、Healer / Verifier 生成闭环、CI 门禁、IDE 悬浮、**SARIF 出站**（`~1 天`，理由见上：语义错位，缺证据 ≠ 缺陷）、**OpenSLO 入站**（商业方向，非比赛方向）、**`gap explain <问题>`**（**需要调用图，不是现有索引的副产物**）
 - 第三类用户：**接手的人**（"这代码在干什么"）——不是新功能，是对账的副产物，报告 ②「这个项目实际是什么」就是它；`gap explain` 是它的 roadmap 出口
 - 工期纪律：**能以规则判的，绝不给 LLM；能少做的渠道，绝不在 6 天里加**
 
@@ -234,14 +234,15 @@ gap analyze <repo> --claims --spec <requirements.md>
 - `gap questions <repo> --top N`：按 `question_priority` 输出追问清单
 - 数据模型含 `authority`（`external` / `self`）；`Verdict.rounds` 是真实字段（实际跑过的检索轮数，不是硬编码 `1`）
 - 报告含 `## 需求可判定性预检` 与 `## 项目实际是什么` 两段
-- **多轮换假设检索**（`prober.ALTERNATE_PLANS` + `pipeline` 挑战循环）：`performance` / `concurrency` 第 2 轮加查「压测结果文件」，`testing` 第 2 轮加查「覆盖率产物」；只升不降、证据与轨迹累加、`max_rounds` 钳制 1..3，报告逐条段出现 `换假设：N 轮（第 1 轮查预设来源，其后换假设重搜）`
+- **多轮换假设检索**（`prober.ALTERNATE_PLANS` + `pipeline` 挑战循环）：`performance` / `concurrency` 第 2 轮加查「压测结果文件」，`testing` 第 2 轮加查「覆盖率产物」；只升不降、证据与轨迹累加、`max_rounds` 钳制 1..3，**只有 `no_evidence` 进第 2 轮**（`supported` / `contradicted` 第 1 轮即返回），报告逐条段出现 `换假设：N 轮（第 1 轮查预设来源，其后换假设重搜）`
 - **`Challenger`（规则版）**：即上面这条换假设重搜——**不做 LLM 反证、不做多 Agent 对话**；产物证据见 `gap-engine/reports/fx-challenge.md`
+- **`contradicted` 三态产出**：只认显式否定声明（`extractors/negation.py`）、必须与需求关键词相关、必须能贴 `file:line`（贴不出降回 `no_evidence`）；反证优先于支持证据，被推翻的支持痕迹条数写进 `reason`；第 1 轮即定论、不进挑战循环。产物证据：`gap-engine/reports/fx-contradicted.md`（`结论：代码里有反证，与要求不一致`、`- 定位：app.py:9`）
 
 **未实现**（roadmap，材料里不许写成已完成）：
 
 - `--claims --spec` 双模式（"我吹的" vs "我要做的"是不是一回事）
 - Healer / Verifier：生成补齐物并跑通（**只补观测、不补实现**；补齐物 = `locustfile.py` + `CRITERIA.md` + `run.sh` + 原始日志）
-- `contradicted` 产出
+
 - CI 门禁、IDE 悬浮
 - **SARIF 出站**（推迟理由：语义错位，缺证据 ≠ 缺陷）、**OpenSLO 入站**（商业方向，非比赛方向）
 - **`gap explain <问题>`**（需要调用图，不是现有索引的副产物）

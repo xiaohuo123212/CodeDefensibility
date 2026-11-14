@@ -1,4 +1,4 @@
-"""C-EXTRACTOR@1/@2/@3/@4 回归测试：注册、证据下限、行号来自实际命中行、路由证据、产物证据、空仓行为。"""
+"""C-EXTRACTOR@1/@2/@3/@4/@5 回归测试：注册、证据下限、行号、路由证据、产物证据、否定证据、空仓行为。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 
 from gap_engine.extractors import EXTRACTORS
-from gap_engine.index import build_index
+from gap_engine.extractors.negation import NEGATION_MARKERS
+from gap_engine.index import RepoIndex, build_index
 from gap_engine.schema import ClaimType, Evidence, EvidenceKind, Strength
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,8 +23,18 @@ EXTRACTOR_NAMES = (
     "bench",
     "config",
     "artifact",
+    "negation",
 )
-NON_STATISTICAL = ("deps", "entry", "concurrency", "tests", "bench", "config", "artifact")
+NON_STATISTICAL = (
+    "deps",
+    "entry",
+    "concurrency",
+    "tests",
+    "bench",
+    "config",
+    "artifact",
+    "negation",
+)
 FIXTURE_NAMES = ("fx-concurrency", "fx-feature", "fx-testing")
 
 
@@ -46,7 +57,7 @@ def _flatten(line: str) -> str:
     return " ".join(line.split())[:120]
 
 
-def test_registry_exposes_the_eight_extractors() -> None:
+def test_registry_exposes_the_nine_extractors() -> None:
     assert set(EXTRACTORS) == set(EXTRACTOR_NAMES)
     for name in EXTRACTOR_NAMES:
         module = importlib.import_module(f"gap_engine.extractors.{name}")
@@ -271,11 +282,110 @@ def test_artifact_is_absent_in_fixtures_without_result_files(fixture: str) -> No
     assert _extract("artifact", fixture) == []
 
 
+def test_negation_markers_are_literal_and_complete() -> None:
+    assert NEGATION_MARKERS == (
+        "不支持",
+        "暂不支持",
+        "尚未支持",
+        "未实现",
+        "暂未实现",
+        "尚未实现",
+        "待实现",
+        "not supported",
+        "unsupported",
+        "not implemented",
+        "only supports",
+        "仅支持",
+    )
+
+
+def test_negation_extracts_negation_and_todo_lines(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "def export():\n"
+        "    # 暂不支持批量导出\n"
+        "    return 1\n"
+        "\n"
+        "# TODO: 实现分页\n"
+        "# TODO: rename helper\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "Not supported yet.\nOnly supports CSV.\n", encoding="utf-8"
+    )
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert {(item.file, item.line) for item in items} == {
+        ("app.py", 2),
+        ("app.py", 5),
+        ("README.md", 1),
+        ("README.md", 2),
+    }
+    assert len(items) == 4
+    assert all(item.kind is EvidenceKind.code for item in items)
+    assert all(item.strength is Strength.high for item in items)
+    assert all(
+        item.supports
+        == [ClaimType.performance, ClaimType.concurrency, ClaimType.feature, ClaimType.testing]
+        for item in items
+    )
+    assert [item.id for item in items] == [f"ev-negation-{n:03d}" for n in range(1, 5)]
+    assert all(item.snippet for item in items)
+    assert not any("rename helper" in item.snippet for item in items)
+
+
+def test_negation_ignores_todo_without_implementation_context(tmp_path: Path) -> None:
+    (tmp_path / "notes.txt").write_text("TODO: rename helper\nFIXME: formatting\n", encoding="utf-8")
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_skips_artifact_only_suffixes(tmp_path: Path) -> None:
+    (tmp_path / "bench.log").write_text("not supported in csv mode\n", encoding="utf-8")
+    (tmp_path / "result.csv").write_text("unsupported,1\n", encoding="utf-8")
+    (tmp_path / "data.json").write_text('{"note": "not implemented"}\n', encoding="utf-8")
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_caps_at_forty_and_dedupes_per_line(tmp_path: Path) -> None:
+    lines = [f"功能 {i} 未实现" for i in range(45)]
+    (tmp_path / "notes.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert len(items) == 40
+    assert items[0].id == "ev-negation-001"
+    assert items[-1].id == "ev-negation-040"
+    assert len({(item.file, item.line) for item in items}) == 40
+
+
+def test_negation_keeps_evidence_when_line_of_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "app.py").write_text("尚未支持导出\n", encoding="utf-8")
+    index = build_index(tmp_path)
+    monkeypatch.setattr(RepoIndex, "line_of", lambda self, p, needle: None)
+
+    items = EXTRACTORS["negation"](index)
+
+    assert len(items) == 1
+    assert items[0].line is None
+    assert items[0].snippet == "尚未支持导出"
+
+
+@pytest.mark.parametrize("fixture", FIXTURE_NAMES)
+def test_negation_is_absent_in_fixtures(fixture: str) -> None:
+    assert _extract("negation", fixture) == []
+
+
 @pytest.mark.parametrize("fixture", FIXTURE_NAMES)
 def test_evidence_lines_come_from_index_line_of(fixture: str) -> None:
     index = build_index(FIXTURES / fixture)
     for name in NON_STATISTICAL:
         for item in EXTRACTORS[name](index):
+            if item.line is None:
+                continue
             lines = (index.root / item.file).read_text(encoding="utf-8").splitlines()
             assert _flatten(lines[item.line - 1]) == item.snippet, f"{name}: {item}"
 

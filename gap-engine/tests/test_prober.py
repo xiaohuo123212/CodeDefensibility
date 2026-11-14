@@ -1,6 +1,6 @@
-"""C-PROBER@1：计划完整性、零命中仍留轨迹、scanned>=hits。
+"""C-PROBER@1 / C-PROBER@6：计划完整性、零命中仍留轨迹、scanned>=hits。
 
-末尾两条覆盖 C-BASELINE@1 的缺文件回退（任务 T4 要求的最小回归）。
+末尾几条覆盖 C-BASELINE@1 的缺文件回退（任务 T4 要求的最小回归）。
 """
 
 from __future__ import annotations
@@ -24,16 +24,24 @@ from gap_engine.spec import claims_from_spec, parse_spec
 
 FIXTURES = Path(__file__).resolve().parents[1] / "contract" / "fixtures"
 
+_NEGATION_PROBE_TYPES = (
+    ClaimType.performance,
+    ClaimType.concurrency,
+    ClaimType.feature,
+    ClaimType.testing,
+)
+
 
 def _claim(claim_type: ClaimType = ClaimType.concurrency, text: str = "支持 500 并发用户") -> Claim:
     return Claim(id="c01", text=text, source="readme", type=claim_type)
 
 
-def test_plan_covers_every_claim_type_with_four_probes() -> None:
+def test_plan_covers_every_claim_type_with_five_probes() -> None:
     assert set(PLAN) == set(ClaimType)
     for claim_type, specs in PLAN.items():
-        assert len(specs) == 4, claim_type
-        assert len({spec.probe for spec in specs}) == 4, claim_type
+        expected = 5 if claim_type in _NEGATION_PROBE_TYPES else 4
+        assert len(specs) == expected, claim_type
+        assert len({spec.probe for spec in specs}) == expected, claim_type
         for spec in specs:
             assert spec.extractor in EXTRACTORS, spec
             assert spec.target
@@ -45,12 +53,14 @@ def test_plan_matches_frozen_probe_names() -> None:
         "压测结果",
         "连接池/缓存配置",
         "并发原语",
+        "否定/未实现声明",
     ]
     assert [spec.probe for spec in plan(_claim(ClaimType.testing))] == [
         "测试文件",
         "测试配置",
         "覆盖率报告",
         "CI 配置",
+        "否定/未实现声明",
     ]
     assert plan(_claim(ClaimType.feature)) == PLAN[ClaimType.feature]
 
@@ -62,7 +72,7 @@ def test_candidate_files_cover_all_extractors() -> None:
 def test_run_keeps_trace_when_nothing_hits(tmp_path: Path) -> None:
     index = build_index(tmp_path)
     probes, evidence = run(_claim(), index)
-    assert len(probes) == 4
+    assert len(probes) == 5
     assert evidence == []
     for probe in probes:
         assert probe.scanned == 0
@@ -73,7 +83,7 @@ def test_run_keeps_trace_when_nothing_hits(tmp_path: Path) -> None:
 def test_run_on_fixture_records_partial_evidence() -> None:
     index = build_index(FIXTURES / "fx-concurrency")
     probes, evidence = run(_claim(), index)
-    assert len(probes) == 4
+    assert len(probes) == 5
     for probe in probes:
         assert probe.scanned >= probe.hits
 
@@ -129,7 +139,8 @@ def test_plan_fills_where_contains_per_probe() -> None:
 
     for claim_type in (ClaimType.architecture, ClaimType.scale, ClaimType.security):
         assert all(spec.where_contains == () for spec in plan(_claim(claim_type)))
-    assert all(spec.where_contains for spec in plan(_claim(ClaimType.concurrency)))
+    assert all(spec.where_contains for spec in plan(_claim(ClaimType.concurrency))[:4])
+    assert plan(_claim(ClaimType.concurrency))[-1].where_contains == ()
 
 
 def test_scanned_ignores_where_contains_filter() -> None:
@@ -232,7 +243,7 @@ def test_fx_spec_visualization_probe_hits_are_all_zero() -> None:
     index = build_index(FIXTURES / "fx-spec")
     probes, _ = run(_fx_spec_claims()["提供数据可视化"], index)
 
-    assert len(probes) == 4
+    assert len(probes) == 5
     assert all(probe.hits == 0 for probe in probes)
     assert all(probe.where == [] for probe in probes)
 
@@ -371,3 +382,41 @@ def test_run_round_one_is_unchanged(tmp_path: Path, monkeypatch) -> None:
         spec.probe for spec in PLAN[ClaimType.concurrency]
     ]
     assert evidence == []
+
+
+def test_negation_candidate_files_follow_contract() -> None:
+    assert CANDIDATE_FILES["negation"] == (
+        "*.py,*.js,*.ts,*.tsx,*.jsx,*.java,*.go,*.rb,*.sh,"
+        "*.md,*.txt,*.toml,*.cfg,*.ini,*.yaml,*.yml"
+    )
+
+
+def test_plan_appends_negation_probe_to_judgeable_types() -> None:
+    for claim_type in _NEGATION_PROBE_TYPES:
+        specs = PLAN[claim_type]
+        assert specs[-1] == ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"), claim_type
+        assert sum(spec.probe == "否定/未实现声明" for spec in specs) == 1, claim_type
+
+    for claim_type in (ClaimType.architecture, ClaimType.scale, ClaimType.security):
+        assert all(spec.extractor != "negation" for spec in PLAN[claim_type]), claim_type
+
+
+def test_alternate_plans_do_not_probe_negation() -> None:
+    for claim_type, specs in ALTERNATE_PLANS.items():
+        assert all(spec.probe != "否定/未实现声明" for spec in specs), claim_type
+
+
+def test_negation_probe_leaves_existing_fixtures_untouched() -> None:
+    cases = [
+        ("fx-concurrency", _claim(ClaimType.concurrency)),
+        ("fx-testing", _claim(ClaimType.testing, "测试覆盖率 80%")),
+        ("fx-feature", _claim(ClaimType.feature, "支持 Excel 导出")),
+        ("fx-spec", _claim(ClaimType.feature, "支持 Excel 导出")),
+    ]
+    for fixture, claim in cases:
+        index = build_index(FIXTURES / fixture)
+        probes, _ = run(claim, index)
+        negation = {probe.probe: probe for probe in probes}["否定/未实现声明"]
+        assert negation.hits == 0, fixture
+        assert negation.where == [], fixture
+        assert negation.scanned > 0, fixture

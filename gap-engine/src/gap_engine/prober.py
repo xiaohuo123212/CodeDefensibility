@@ -55,6 +55,7 @@ PLAN: dict[ClaimType, tuple[ProbeSpec, ...]] = {
             ("pool", "cache", "workers", "max_connections"),
         ),
         ProbeSpec("并发原语", "concurrency", "线程/协程/锁等并发原语", _CONCURRENCY_TOKENS),
+        ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"),
     ),
     ClaimType.concurrency: (
         ProbeSpec("压测脚本", "bench", "locust/k6/wrk/ab 压测脚本", _BENCH_TOKENS),
@@ -71,6 +72,7 @@ PLAN: dict[ClaimType, tuple[ProbeSpec, ...]] = {
             "pool_size/max_connections 配置",
             ("pool", "max_connections", "connection", "cache"),
         ),
+        ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"),
     ),
     ClaimType.feature: (
         ProbeSpec(
@@ -88,6 +90,7 @@ PLAN: dict[ClaimType, tuple[ProbeSpec, ...]] = {
         ),
         ProbeSpec("相关实现", "structure", "按模块划分的实现文件", ("def ", "class ")),
         ProbeSpec("测试覆盖", "tests", "对应测试文件", ("test_", "_test.")),
+        ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"),
     ),
     ClaimType.testing: (
         ProbeSpec("测试文件", "tests", "test_*.py 等测试文件", ("test_", "_test.", "spec.")),
@@ -112,6 +115,7 @@ PLAN: dict[ClaimType, tuple[ProbeSpec, ...]] = {
             (".github", ".gitlab-ci", "Jenkinsfile", ".travis", "azure-pipelines"),
             path_only=True,
         ),
+        ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"),
     ),
     ClaimType.architecture: _SHARED_SPECS,
     ClaimType.scale: _SHARED_SPECS,
@@ -139,6 +143,10 @@ CANDIDATE_FILES: dict[str, str] = {
     "entry": "*.py,*.js",
     "structure": "*",
     "artifact": "*.log,*.csv,*.json,*.txt,*.xml,*.html",
+    "negation": (
+        "*.py,*.js,*.ts,*.tsx,*.jsx,*.java,*.go,*.rb,*.sh,"
+        "*.md,*.txt,*.toml,*.cfg,*.ini,*.yaml,*.yml"
+    ),
 }
 
 
