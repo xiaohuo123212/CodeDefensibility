@@ -1,15 +1,29 @@
-"""命令行入口：``gap analyze`` / ``gap questions`` / ``gap spec``（C-CLI@1 / C-CLI@2 / C-CLI@3）。"""
+"""命令行入口：``gap analyze`` / ``gap questions`` / ``gap spec`` / ``gap score``
+（C-CLI@1 / C-CLI@2 / C-CLI@3 / C-CLI@4）。
+"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from .metrics import compute
 from .pipeline import analyze_repo, analyze_spec, render_spec_to, render_to
 from .priority import sort_key, weight_breakdown
+from .review import RECEIPT_KEYS, load_receipts, score
+from .schema import (
+    Claim,
+    ClaimType,
+    Confidence,
+    Coverage,
+    Locator,
+    SearchProbe,
+    Status,
+    Verdict,
+)
 from .spec import parse_spec
 
 DEFAULT_OUT = "reports/report.md"
@@ -38,6 +52,12 @@ def _build_parser() -> argparse.ArgumentParser:
     spec.add_argument("--spec", required=True)
     spec.add_argument("--out", default=None)
 
+    score_parser = sub.add_parser("score", help="按回执计算七指标")
+    score_parser.add_argument("--analysis", required=True)
+    score_parser.add_argument("--receipts", default=None)
+    score_parser.add_argument("--out", default=None)
+    score_parser.add_argument("--json", default=None)
+
     return parser
 
 
@@ -48,7 +68,7 @@ def _missing_repo(repo: str) -> bool:
     return True
 
 
-def _write_json(path: Path, payload: dict[str, object]) -> None:
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -156,6 +176,96 @@ def spec_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pct(value: int | float) -> str:
+    return f"{round(value * 100, 1):.1f}"
+
+
+def _score_lines(result: dict[str, int | float]) -> list[str]:
+    n_agree = int(result["n_agree"])
+    n_disagree = int(result["n_disagree"])
+    n_asserted = int(result["n_asserted"])
+    n_silent = int(result["n_silent"])
+    n_valid = int(result["n_valid"])
+    n_all_judgeable = int(result["n_all_judgeable"])
+    return [
+        f"需求提出人认可率：{_pct(result['author_approval_rate'])}%"
+        f"（N={n_agree + n_disagree}）",
+        f"定位率：{_pct(result['locator_rate'])}%（N={n_asserted}）",
+        f"漏报率（假阴性）：{_pct(result['false_negative_rate'])}%（N={n_silent}）",
+        f"误报率（假阳性）：{_pct(result['false_positive_rate'])}%（N={n_asserted}）",
+        f"无法证伪异议率：{_pct(result['unfalsifiable_rate'])}%（N={n_valid}）",
+        f"说不清率：{_pct(result['unclear_rate'])}%（N={n_valid}）",
+        f"未覆盖率：{_pct(result['uncovered_rate'])}%（N={n_all_judgeable}）",
+    ]
+
+
+def _parse_analysis(text: str) -> tuple[list[Claim], list[Verdict]]:
+    payload = json.loads(text)
+    claims = [
+        Claim(
+            id=item["id"],
+            text=item["text"],
+            source=item["source"],
+            type=ClaimType(item["type"]),
+            checkable=item.get("checkable", True),
+            uncheckable_reason=item.get("uncheckable_reason"),
+            out_of_scope=item.get("out_of_scope", False),
+            authority=item.get("authority", "self"),
+        )
+        for item in payload["claims"]
+    ]
+    verdicts = [
+        Verdict(
+            claim_id=item["claim_id"],
+            status=Status(item["status"]),
+            confidence=Confidence(item["confidence"]),
+            locator=None if item.get("locator") is None else Locator(**item["locator"]),
+            coverage=Coverage(item["coverage"]),
+            evidence_ids=list(item.get("evidence_ids", [])),
+            reason=item.get("reason", ""),
+            search_trace=[SearchProbe(**probe) for probe in item.get("search_trace", [])],
+            rounds=item.get("rounds", 1),
+            question=item.get("question", ""),
+            question_priority=item.get("question_priority", 0),
+            fix=item.get("fix", ""),
+        )
+        for item in payload["verdicts"]
+    ]
+    return claims, verdicts
+
+
+def score_command(args: argparse.Namespace) -> int:
+    analysis_path = Path(args.analysis)
+    try:
+        text = analysis_path.read_text(encoding="utf-8")
+    except OSError:
+        print(f"analysis 文件不存在：{args.analysis}", file=sys.stderr)
+        return 2
+
+    try:
+        claims, verdicts = _parse_analysis(text)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        print(f"analysis 文件格式错误：{args.analysis}", file=sys.stderr)
+        return 2
+
+    receipts = load_receipts(Path(args.receipts)) if args.receipts else []
+    result = score(claims, verdicts, receipts)
+    lines = _score_lines(result)
+    for line in lines:
+        print(line)
+
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        body = "# 指标（N 为分母）\n\n" + "\n".join(lines) + "\n"
+        out_path.write_text(body, encoding="utf-8")
+
+    if args.json:
+        _write_json(Path(args.json), {key: result[key] for key in RECEIPT_KEYS})
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     try:
@@ -163,7 +273,12 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    handlers = {"analyze": analyze, "questions": questions, "spec": spec_command}
+    handlers = {
+        "analyze": analyze,
+        "questions": questions,
+        "spec": spec_command,
+        "score": score_command,
+    }
     handler = handlers.get(args.command or "")
     if handler is None:
         parser.print_usage(sys.stderr)

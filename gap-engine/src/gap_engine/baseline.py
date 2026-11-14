@@ -1,7 +1,9 @@
-"""同类项目普遍性先验（C-BASELINE@1）。
+"""同类项目普遍性先验（C-BASELINE@1/@2）。
 
 双条件缺口的第二条件：缺证据之外，还要求"同类项目普遍具备"。
-D1–D3 用先验值，D4 换成实测 ``reports/prevalence.json``，报告须标注来源。
+D1–D3 用先验值，D4 起可换成实测 ``reports/prevalence.json``，报告须标注来源。
+实测文件是 ``{"<type>": {"n_claims", "n_prevalent", "prevalence"}}`` 嵌套结构，
+手工文件是 ``{"<type>": 0.5}`` 扁平结构，两者读回同一个 ``dict[ClaimType, float]``。
 """
 
 from __future__ import annotations
@@ -29,6 +31,21 @@ def is_prevalent(t: ClaimType, prevalence: dict[ClaimType, float] | None = None)
     return table.get(t, PREVALENCE[t]) >= PREVALENCE_THRESHOLD
 
 
+def _accepted_ratio(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, dict):
+        candidate = value.get("prevalence")
+        if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+            return None
+        ratio = float(candidate)
+    elif isinstance(value, (int, float)):
+        ratio = float(value)
+    else:
+        return None
+    return ratio if 0.0 <= ratio <= 1.0 else None
+
+
 def load_prevalence(path: Path) -> dict[ClaimType, float]:
     table = dict(PREVALENCE)
     try:
@@ -43,9 +60,8 @@ def load_prevalence(path: Path) -> dict[ClaimType, float]:
             claim_type = ClaimType(key)
         except ValueError:
             continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        ratio = _accepted_ratio(value)
+        if ratio is None:
             continue
-        ratio = float(value)
-        if 0.0 <= ratio <= 1.0:
-            table[claim_type] = ratio
+        table[claim_type] = ratio
     return table

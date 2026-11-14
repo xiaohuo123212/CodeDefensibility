@@ -71,6 +71,35 @@ pytest
 bash build.sh
 ```
 
+## 6. 普遍性（prevalence）口径
+
+缺口判定要用"这类要求在同类项目里普遍吗"。这个数有两个来源，**不得混用**：
+
+| 来源 | 值从哪来 | 对外标注 |
+|---|---|---|
+| 先验表 | `gap-engine/src/gap_engine/baseline.py` 的 `PREVALENCE`（人对同类项目的经验值） | 「先验」——报告局限段固定写明「缺口判定依赖先验普遍性表（PREVALENCE），尚未用同类项目实测」 |
+| 实测 | 多份 `gap analyze --json` 产物聚合出的 `reports/prevalence.json`（顶层 `"_source": "measured"`，另带 `_n_projects`） | 「实测」——必须同时给出样本数 N |
+
+复算命令（在 `gap-engine/` 目录执行；`--analysis` 可传多份 `--json` 产物，每个被测项目一份）：
+
+```bash
+python tools/measure_prevalence.py --analysis <多份 analyze --json 产物> --out reports/prevalence.json --compare
+```
+
+`--compare` 会逐类打印「实测 x%（N=…）｜先验 y%」，便于核对偏差。
+
+**纪律**：报告的默认值来自先验表，标「先验」；跑过上述命令后的数值才是实测，标「实测」。两者不得混用；未实测时数值必须写成 `N=?` 并标「先验」，禁止把先验值说成实测。
+
+## 7. 打包成提交包
+
+在仓库根（含 `ppt/ video/ codearts_proof/ readme/ gap-engine/` 的那一层）执行：
+
+```bash
+python gap-engine/tools/package.py --name "对账引擎-GapEngine-<队伍名>-v1.0-<手机号>.zip"
+```
+
+产物落在 `dist/`，顶层恰为 `ppt/ project/ video/ codearts_proof/ readme/` 五个目录（`gap-engine/` 在包内改名为 `project/`），并自动排除 `.git/`、`__pycache__/`、`*.pyc`、`.env`、`build/`、`dist/` 等。若某个目录缺失，脚本会打印 `缺少交付目录：<名>` 并以退出码 2 结束。
+
 ## 产物在哪
 
 `gap-engine/reports/` 下六份报告，由对应 fixture 跑出，与 CLI 输出逐字一致（`tests/test_fixtures.py` 守卫）：
