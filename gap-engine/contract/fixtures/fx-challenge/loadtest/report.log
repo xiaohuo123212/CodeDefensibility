@@ -1,0 +1,5 @@
+# loadtest summary
+requests: 120000 users: 500
+latency p95: 180 ms  p99: 420 ms
+throughput: 1200 rps
+error rate: 0.4%

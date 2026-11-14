@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gap-engine"
+version = "0.1.0"
+description = "对账引擎：需求清单（或自我声称）+ 代码仓库 → 三态对账报告（定位、搜索轨迹、需求可判定性预检）"
+
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+gap = "gap_engine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

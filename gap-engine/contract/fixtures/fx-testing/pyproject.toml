@@ -1,0 +1,10 @@
+[project]
+name = "fx-testing"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -1,0 +1,133 @@
+"""CLI 子命令测试（C-CLI@2）：三种退出码与报告落盘。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from gap_engine import cli
+
+SPEC_TEXT = "- 支持 Excel 导出\n"
+
+
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "app.py").write_text(
+        "from flask import Flask\n"
+        "\n"
+        "app = Flask(__name__)\n"
+        "\n"
+        "\n"
+        "@app.route('/export')\n"
+        "def export():\n"
+        "    import openpyxl\n"
+        "    return 'ok'\n",
+        encoding="utf-8",
+    )
+    (repo / "requirements.txt").write_text("flask\n", encoding="utf-8")
+    return repo
+
+
+def _spec(tmp_path: Path, text: str = SPEC_TEXT) -> Path:
+    spec = tmp_path / "requirements.md"
+    spec.write_text(text, encoding="utf-8")
+    return spec
+
+
+def test_analyze_report_contains_facts_section(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    out = tmp_path / "out" / "report.md"
+
+    code = cli.main(["analyze", str(repo), "--out", str(out)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert f"report: {out}" in captured.out
+    text = out.read_text(encoding="utf-8")
+    assert "## 项目实际是什么" in text
+    assert "- 一句话：" in text
+    assert "- 路由：1 个（GET /export）" in text
+    assert text.index("## 项目实际是什么") < text.index("## 概览")
+
+
+def test_spec_success_writes_report(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path)
+    out = tmp_path / "out" / "repo-spec.md"
+
+    code = cli.main(["spec", str(repo), "--spec", str(spec), "--out", str(out)])
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert f"report: {out}" in captured.out
+    assert captured.err == ""
+    assert out.exists()
+    text = out.read_text(encoding="utf-8")
+    assert "# repo 需求对账报告" in text
+    assert "## 需求可判定性预检" in text
+    assert "## 项目实际是什么" in text
+
+
+def test_spec_default_out_is_reports_dir(tmp_path: Path, monkeypatch, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    code = cli.main(["spec", str(repo), "--spec", str(spec)])
+
+    captured = capsys.readouterr()
+    default_rel = Path("reports") / "repo-spec.md"
+    assert code == 0
+    assert f"report: {default_rel}" in captured.out
+    assert (tmp_path / default_rel).exists()
+
+
+def test_missing_spec_file_returns_two(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    missing = tmp_path / "absent.md"
+
+    code = cli.main(["spec", str(repo), "--spec", str(missing)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert f"spec 文件不存在：{missing}" in captured.err
+    assert not (tmp_path / "reports").exists()
+
+
+def test_empty_spec_returns_two_without_report(tmp_path: Path, capsys) -> None:
+    repo = _repo(tmp_path)
+    spec = _spec(tmp_path, "# 只有标题\n\n一段普通说明，没有列表条目。\n")
+    out = tmp_path / "repo-spec.md"
+
+    code = cli.main(["spec", str(repo), "--spec", str(spec), "--out", str(out)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "需求清单里没有找到条目" in captured.err
+    assert not out.exists()
+
+
+def test_missing_repo_returns_one(tmp_path: Path, capsys) -> None:
+    spec = _spec(tmp_path)
+
+    code = cli.main(["spec", str(tmp_path / "nope"), "--spec", str(spec)])
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "仓库路径不存在" in captured.err
+
+
+def test_spec_argument_is_required(tmp_path: Path, capsys) -> None:
+    code = cli.main(["spec", str(tmp_path)])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--spec" in captured.err
+
+
+def test_unknown_command_returns_two(capsys) -> None:
+    code = cli.main([])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "usage" in captured.err
