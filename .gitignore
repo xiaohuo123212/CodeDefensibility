@@ -15,3 +15,5 @@ venv/
 .DS_Store
 Thumbs.db
 .tmp/
+# 本地会话导出留痕，不入库
+华为云码道CodeArts代码智能体 *.md
