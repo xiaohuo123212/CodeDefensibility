@@ -201,7 +201,7 @@ curl -fsS http://<中转机公网IP>:8080/_stcore/health
 - `STREAMLIT_BROWSER_GATHER_USAGE_STATS=false`：不在公网环境回传统计。
 - CORS/XSRF：`deploy/entrypoint.sh` 默认 `ENABLE_CORS=false`、`ENABLE_XSRF_PROTECTION=true`。外部域名与容器 Host 不一致时，若页面报 CORS/WebSocket 403，先确认反代是否转发 `Host` 与 `Upgrade`；只在确认是来源校验导致时才临时 `-e GAP_DEMO_ENABLE_XSRF=false`，并知悉这会降低外网防护。
 - 健康端点固定为 `/_stcore/health`，返回 body `ok`；`deploy/healthcheck.py` 与 Docker `HEALTHCHECK` 都打它。
-- demo 的输入是「仓库路径 / 需求清单路径」，容器内可演示样本在 `/app/contract/fixtures/fx-spec` 等目录，页面里填这个路径即可。
+- demo 的输入有三种：**服务器路径**（容器内可演示样本在 `/app/contract/fixtures/fx-spec` 等目录，填这个路径即可）、**上传 zip**（≤ 20 MB、≤ 2000 个文件、不含符号链接，单顶层目录会自动下钻）、**GitHub URL**（只接受 `https://github.com/<owner>/<repo>`，服务端 `git clone --depth 1`，超时 120 s）。
 
 ---
 
@@ -279,8 +279,31 @@ cd ~/CodeDefensibility && bash deploy/server-run.sh
 
 ---
 
+## 三入口重部署实测（2026-11-15，同日追加）
+
+同一台服务器、同一条隧道上的**重新部署**：重启 Streamlit 进程加载三入口代码（`demo/app.py` + `demo/source.py`）。**cloudflared 隧道未重建，因此公网 URL 与上节相同**：`https://accomplish-refer-local-themes.trycloudflare.com`（临时域名，重启即变）。
+
+### 实测结果
+
+| 入口 | 操作 | 结果 |
+| --- | --- | --- |
+| 服务器路径 | 原有入口 | 保持可用，行为未变 |
+| 上传 zip | 把 `contract/fixtures/fx-spec` 打成 zip（解压后 4 个文件）上传 | 自动下钻到唯一顶层目录 `fx-spec`，生成 1769 字符报告，首行为 `# fx-spec 需求对账报告` |
+| GitHub URL | 填公开仓库 `octocat/Hello-World` | `clone_github` 浅克隆成功，正常出报告 |
+
+- 公网健康检查：`curl -fsS https://accomplish-refer-local-themes.trycloudflare.com/_stcore/health` → **HTTP 200，body `ok`**。
+
+### 隐私边界（对外必须写明）
+
+- **上传文件仅在服务器临时目录内处理，请求结束即删除。** 三个入口都在 `tempfile.TemporaryDirectory()` 内完成解压/克隆与对账，不写进程 cwd、不写仓库目录，服务端不保留上传内容。
+- 上传限制：≤ 20 MB、解压后累计 ≤ 200 MB、条目 ≤ 2000、不含符号链接；GitHub 入口只接受 `https://github.com/<owner>/<repo>`，浅克隆超时 120 s。
+- 该实例仍是**单实例演示**：无并发队列、无配额、无 SLA；临时域名重启即变，不得对外宣称为生产部署。
+
+---
+
 ## 本次物料的验证范围（2026-11-15 更新）
 
 - 已做：`deploy/healthcheck.py` / `deploy/entrypoint.sh` / `deploy/server-run.sh` 的语法级检查（`py_compile` / `bash -n`）。
 - **已实机验证（2026-11-15，见上节「实测记录」）**：`virtualenv` 建环境 + `pip install -e ".[demo]"`、Streamlit 用户级启动、`/_stcore/health` 在本机与公网均返回 `ok`、`cloudflared` 临时隧道连通、公网 URL 可达。
+- **已实机验证（2026-11-15 重部署，见上节「三入口重部署实测」）**：上传 zip（`contract/fixtures/fx-spec`，4 个文件，自动下钻 `fx-spec`，报告 1769 字符）与 GitHub URL（`octocat/Hello-World` 浅克隆成功）两条入口在公网实例上跑通，服务器路径入口保持可用。
 - 仍未验证：`docker build` / `docker run`（目标机未装 Docker）、`nginx -t`、`certbot`、frp 路径（路径 C）、命名隧道（A2，需 Cloudflare 账号）。这些需在一台装有 Docker 或具备 sudo 的机器上自行跑一遍。
