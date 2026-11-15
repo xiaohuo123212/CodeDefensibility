@@ -219,7 +219,68 @@ curl -fsS http://<中转机公网IP>:8080/_stcore/health
 
 ---
 
-## 本次物料的验证范围
+## 实测记录（2026-11-15，已真实跑通）
 
-- 已做：`deploy/healthcheck.py` 与 `deploy/entrypoint.sh` 的语法级检查（`py_compile` / `bash -n`）。
-- 未实机验证（当前环境无 Docker、也接触不到你的私网服务器）：`docker build`、容器启动、`nginx -t`、`certbot`、`cloudflared`/`frp` 隧道连通性、公网 URL 可达性。以上必须在私网服务器 / ECS 上按本文命令自行跑一遍，并把结果写回提交材料。
+本节是**实跑结果**，不是设计说明。
+
+### 目标机事实
+
+| 项 | 实测值 |
+| --- | --- |
+| 发行版 | Ubuntu 26.04.1 LTS（kernel 7.0.0-43-generic） |
+| Python | 3.14.4（系统仅此一个版本） |
+| Docker | **未安装**，且 `sudo` 需交互密码 → 本文档路径 A 的容器化步骤在该机不可用 |
+| 外网直连 | `http://<该机公网IP>:8501` **不可达**（10s 超时）→ 必须走隧道 |
+| 磁盘 | 可用 99 GB |
+
+### 无 Docker 时的用户级路径（本次实际采用）
+
+```bash
+# 1) 取代码（仓库为 public，服务器直接 clone，无需传输文件）
+cd ~ && git clone --depth 1 https://github.com/xiaohuo123212/CodeDefensibility.git
+
+# 2) 建隔离环境（PEP 668 + 缺 python3.14-venv，见下文「三个坑」）
+cd ~/CodeDefensibility/gap-engine
+python3 -m pip install --user --break-system-packages virtualenv
+python3 -m virtualenv -p python3 .venv2
+.venv2/bin/pip install -e ".[demo]"
+
+# 3) 启动并自检（脚本做健康检查）
+cd ~/CodeDefensibility && bash deploy/server-run.sh
+
+# 4) 起临时隧道
+~/bin/cloudflared tunnel --url http://localhost:8501 --no-autoupdate > ~/cf.log 2>&1 &
+```
+
+### 结果
+
+- 本机回源：`curl http://127.0.0.1:8501/_stcore/health` → `ok`
+- 公网地址：`https://accomplish-refer-local-themes.trycloudflare.com`
+- 公网健康检查：`/_stcore/health` → **HTTP 200，body `ok`，1.02 s**
+- 公网根路径：HTTP 200，`text/html`，7863 字节
+- 隧道：cloudflared 2026.11.0，QUIC，节点 hkg11
+- 依赖版本（cp314 wheel 均可用）：streamlit 1.67.0 / pandas 3.1.1 / pyarrow 26.0.1 / numpy 2.5.4
+
+### 三个坑（按出现顺序）
+
+1. `python3 -m venv .venv` 失败：系统未装 `python3.14-venv`，装它需要 sudo。改用 `virtualenv`（用户级即可）。
+2. `pip install --user virtualenv` 被 PEP 668 拒绝（externally-managed-environment）。必须同时加 `--user --break-system-packages`——只写入 `~/.local`，不覆盖系统包。
+3. 直接 `ssh host 'nohup ... &'` 会让 SSH 通道挂住不返回。改用 `setsid <cmd> > log 2>&1 < /dev/null &`。
+
+### 进程保活与重启
+
+- `streamlit` 与 `cloudflared` 都用 `setsid` 脱离 SSH 会话，断开连接后继续运行。
+- **机器重启后两者都不会自动恢复**，需重跑 `deploy/server-run.sh` 与隧道命令；临时域名每次都会变。
+- 该服务器上另有**一条与本 demo 无关的 cloudflared 隧道**（转发到 `127.0.0.1:8000`，已运行 1 天 19 小时）。本次未改动它，两条隧道并存互不影响。
+
+### 对外表述（只能这样写）
+
+> demo 于 2026-11-15 在某私网服务器（Ubuntu 26.04 / Python 3.14）上以用户级 venv 启动，通过 Cloudflare 临时隧道对外提供访问：`https://accomplish-refer-local-themes.trycloudflare.com`（临时域名，隧道重启即失效）。该实例仅用于评审演示，非生产部署，无 SLA。
+
+---
+
+## 本次物料的验证范围（2026-11-15 更新）
+
+- 已做：`deploy/healthcheck.py` / `deploy/entrypoint.sh` / `deploy/server-run.sh` 的语法级检查（`py_compile` / `bash -n`）。
+- **已实机验证（2026-11-15，见上节「实测记录」）**：`virtualenv` 建环境 + `pip install -e ".[demo]"`、Streamlit 用户级启动、`/_stcore/health` 在本机与公网均返回 `ok`、`cloudflared` 临时隧道连通、公网 URL 可达。
+- 仍未验证：`docker build` / `docker run`（目标机未装 Docker）、`nginx -t`、`certbot`、frp 路径（路径 C）、命名隧道（A2，需 Cloudflare 账号）。这些需在一台装有 Docker 或具备 sudo 的机器上自行跑一遍。
