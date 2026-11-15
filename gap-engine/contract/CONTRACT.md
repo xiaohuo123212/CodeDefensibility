@@ -1,6 +1,6 @@
-# gap-engine 契约十一句（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@1 / C-MATCHER@4 / C-PROBER@5 / C-PIPELINE@5 / C-EXTRACTOR@4/@5 / C-RENDERER@7）
+# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@1 / C-MATCHER@4 / C-PROBER@5 / C-PIPELINE@5 / C-EXTRACTOR@4/@5 / C-RENDERER@7 / C-DEMO@2）
 
-> 本文件是人可读镜像，实现以 `src/gap_engine/` 为准。每个 AI 会话开始前先读这十一句。
+> 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十一句。
 
 1. 状态只有三种：`supported` / `contradicted` / `no_evidence`，不存在第四种。
 2. 敢说"支持"或"反对"，就必须给出一个可点击定位（`file:line`）；给不出，只能是 `no_evidence`。
@@ -27,6 +27,7 @@
 | C-EXTRACTOR@4 | `src/gap_engine/extractors/artifact.py` | `extract`（`kind="bench"`、`strength="medium"`、`CAP=40`） |
 | C-EXTRACTOR@5 | `src/gap_engine/extractors/negation.py` | `NEGATION_MARKERS` / `extract`（显式否定声明） |
 | C-RENDERER@7 | `src/gap_engine/renderer.py` | `render` 的 `结论：` 三态文案、`换假设：{rounds} 轮` 行、局限段措辞 |
+| C-DEMO@2 | `demo/source.py`（新增）+ `demo/app.py` | `extract_zip` / `clone_github` + 四个上限常量；三种输入方式与 UI 约束 |
 
 ## Challenger（规则版）
 
@@ -41,3 +42,11 @@
 - **反证优先于支持证据**：同一条既有支持痕迹又是否定声明时仍判 `contradicted`，`reason` 写「代码里有反证：…（另有 k 处支持痕迹，被反证推翻）」。
 - **不进挑战循环**：`contradicted` 与 `supported` 都在第 1 轮返回，`Verdict.rounds` 恒为 `1`；只有 `no_evidence` 进第 2 轮。
 - 产物证据：`reports/fx-contradicted.md` 的 `结论：代码里有反证，与要求不一致` 与 `- 定位：app.py:9`。
+
+## demo 输入源（C-DEMO@2）
+
+- **三种输入**：服务器路径 / 上传 zip / GitHub URL。全部在 `tempfile.TemporaryDirectory()` 内处理，请求结束即清理，不写进程 cwd、不写仓库目录。
+- **zip 约束**：上传 ≤ 20 MB、解压累计 ≤ 200 MB、条目 ≤ 2000；拒绝含 `..` 的成员、绝对路径、盘符、符号链接；解压后若只有一个顶层目录则自动下钻。
+- **clone 约束**：只接受 `https://github.com/<owner>/<repo>` 形式；`git clone --depth 1`，超时 120 s，`GIT_TERMINAL_PROMPT=0`；**禁止 `shell=True`**，URL 不得拼进字符串命令；超时映射为 `TimeoutError`，非零返回码映射为 `ValueError`。
+- **UI 约束**：`st.text_input` 共 3 个（服务器路径、GitHub URL、需求清单）；异常只捕获 `(OSError, ValueError)`，禁止 `except Exception`。
+- 输入源变化**不改变**三态判定与判定域规则：仍然是「识别七类、只判四类」，`architecture` / `scale` / `security` 始终 `out_of_scope`。

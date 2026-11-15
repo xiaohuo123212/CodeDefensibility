@@ -49,6 +49,21 @@ def _string_constants(tree: ast.Module) -> set[str]:
     }
 
 
+def _module_sequence(tree: ast.Module, name: str) -> list[str]:
+    """取模块级 ``name = ("a", "b")`` 这类序列字面量的元素值。"""
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in node.targets
+        ):
+            continue
+        assert isinstance(node.value, (ast.Tuple, ast.List)), f"{name} 必须是序列字面量"
+        return [elt.value for elt in node.value.elts]
+    raise AssertionError(f"缺少模块级常量 {name}")
+
+
 def test_build_matches_snapshot_verbatim() -> None:
     spec = FX_CONTRADICTED / "requirements.md"
     expected = (REPORTS / "fx-contradicted.md").read_text(encoding="utf-8")
@@ -93,12 +108,49 @@ def test_app_is_streamlit_shell() -> None:
 
     assert _st_calls(tree, "title"), "缺少 st.title(...) 调用"
     assert "对账引擎" in constants
-    assert len(_st_calls(tree, "text_input")) == 2
+    assert len(_st_calls(tree, "text_input")) == 3
     assert "仓库路径" in constants
     assert "需求清单（可选，留空则用仓库 README 的自我声称）" in constants
     assert _st_calls(tree, "button"), '缺少 st.button("对账") 调用'
     assert "对账" in constants
     assert _st_calls(tree, "markdown"), "缺少 st.markdown(...) 调用"
+
+
+def test_app_offers_three_input_modes() -> None:
+    tree = ast.parse(APP_SOURCE.read_text(encoding="utf-8"))
+    constants = _string_constants(tree)
+    modes = _module_sequence(tree, "INPUT_MODES")
+    radios = _st_calls(tree, "radio")
+
+    assert modes == ["服务器路径", "上传 zip", "GitHub URL"]
+    for label in modes:
+        assert label in constants
+
+    assert len(radios) == 1, "缺少唯一的 st.radio(...) 输入方式选择"
+    options = radios[0].args[1] if len(radios[0].args) > 1 else None
+    assert isinstance(options, ast.Name), "st.radio 的选项必须是 INPUT_MODES"
+    assert options.id == "INPUT_MODES"
+
+    uploaders = _st_calls(tree, "file_uploader")
+    assert len(uploaders) == 1, "缺少唯一的 st.file_uploader(...) 调用"
+    types = [kw.value for kw in uploaders[0].keywords if kw.arg == "type"]
+    assert types, "st.file_uploader 缺少 type 关键字参数"
+    assert [elt.value for elt in types[0].elts] == ["zip"]
+
+
+def test_app_delegates_input_sources_to_demo_source() -> None:
+    source = APP_SOURCE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    called = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+
+    assert {"extract_zip", "clone_github"} <= called
+    assert "TemporaryDirectory" in source
+    assert "extractall" not in source
+    assert "shell=True" not in source
 
 
 def test_app_catches_only_oserror_and_valueerror() -> None:
