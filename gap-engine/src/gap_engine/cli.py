@@ -1,5 +1,6 @@
 """命令行入口：``gap analyze`` / ``gap questions`` / ``gap spec`` / ``gap score``
-（C-CLI@1 / C-CLI@2 / C-CLI@3 / C-CLI@4）。
+（C-CLI@1 / C-CLI@2 / C-CLI@3 / C-CLI@4），以及 ``gap parse-spec`` / ``gap advise``
+（C-LLM@1/cli）。
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from .advice import render_advice
+from .llm import LlmProvider, load_provider
 from .metrics import compute
 from .pipeline import analyze_repo, analyze_spec, render_spec_to, render_to
 from .priority import sort_key, weight_breakdown
@@ -25,10 +28,12 @@ from .schema import (
     Verdict,
 )
 from .spec import parse_spec
+from .specjson import write_spec_json
 
 DEFAULT_OUT = "reports/report.md"
 DEFAULT_SPEC_OUT_DIR = "reports"
 SPEC_EMPTY_MESSAGE = '需求清单里没有找到条目（请用 "- " 或 "1. " 开头）'
+LLM_DEGRADED_MESSAGE = "未配置 GAP_LLM_API_KEY，已降级为规则解析"
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -58,7 +63,40 @@ def _build_parser() -> argparse.ArgumentParser:
     score_parser.add_argument("--out", default=None)
     score_parser.add_argument("--json", default=None)
 
+    parse_spec_parser = sub.add_parser(
+        "parse-spec", help="把需求清单固化为 gap-spec@1 JSON"
+    )
+    parse_spec_parser.add_argument("spec")
+    parse_spec_parser.add_argument("--out", required=True)
+    parse_spec_parser.add_argument("--llm", action="store_true")
+
+    advise_parser = sub.add_parser(
+        "advise", help="为没找到证据的条目生成 AI 推演建议（独立产物）"
+    )
+    advise_parser.add_argument("repo")
+    advise_parser.add_argument("--spec", required=True)
+    advise_parser.add_argument("--out", required=True)
+    advise_parser.add_argument("--llm", action="store_true")
+
     return parser
+
+
+def _provider_for(use_llm: bool, message: str) -> LlmProvider | None:
+    """``--llm`` 未开启时绝不探测环境、绝不发起调用（R8）。"""
+    if not use_llm:
+        return None
+    provider = load_provider()
+    if provider is None:
+        print(message, file=sys.stderr)
+    return provider
+
+
+def _read_spec_text(spec_arg: str) -> str | None:
+    try:
+        return Path(spec_arg).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        print(f"spec 文件不存在：{spec_arg}", file=sys.stderr)
+        return None
 
 
 def _missing_repo(repo: str) -> bool:
@@ -176,6 +214,38 @@ def spec_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_spec_command(args: argparse.Namespace) -> int:
+    text = _read_spec_text(args.spec)
+    if text is None:
+        return 2
+    if not parse_spec(text):
+        print(SPEC_EMPTY_MESSAGE, file=sys.stderr)
+        return 2
+
+    provider = _provider_for(args.llm, LLM_DEGRADED_MESSAGE)
+    path = write_spec_json(text, Path(args.spec).name, Path(args.out), provider)
+    print(f"spec: {path}")
+    return 0
+
+
+def advise_command(args: argparse.Namespace) -> int:
+    if _missing_repo(args.repo):
+        return 1
+
+    text = _read_spec_text(args.spec)
+    if text is None:
+        return 2
+    if not parse_spec(text):
+        print(SPEC_EMPTY_MESSAGE, file=sys.stderr)
+        return 2
+
+    provider = _provider_for(args.llm, LLM_DEGRADED_MESSAGE)
+    analysis = analyze_spec(Path(args.repo), text, spec_path=Path(args.spec).name)
+    path = render_advice(analysis, Path(args.out), provider)
+    print(f"advice: {path}")
+    return 0
+
+
 def _pct(value: int | float) -> str:
     return f"{round(value * 100, 1):.1f}"
 
@@ -278,6 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         "questions": questions,
         "spec": spec_command,
         "score": score_command,
+        "parse-spec": parse_spec_command,
+        "advise": advise_command,
     }
     handler = handlers.get(args.command or "")
     if handler is None:

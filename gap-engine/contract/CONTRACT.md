@@ -1,6 +1,6 @@
-# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@1 / C-MATCHER@4 / C-PROBER@5 / C-PIPELINE@5 / C-EXTRACTOR@4/@5 / C-RENDERER@7 / C-DEMO@2）
+# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@1 / C-MATCHER@4 / C-PROBER@5 / C-PIPELINE@5 / C-EXTRACTOR@4/@5 / C-RENDERER@7 / C-DEMO@2 / C-LLM@1）
 
-> 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十一句。
+> 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十二句。
 
 1. 状态只有三种：`supported` / `contradicted` / `no_evidence`，不存在第四种。
 2. 敢说"支持"或"反对"，就必须给出一个可点击定位（`file:line`）；给不出，只能是 `no_evidence`。
@@ -13,6 +13,7 @@
 9. 同分按 `claim_id` 升序，且不引入任何第二排序键。
 10. 报告里的"查过 N 类 M 处"只能由 `trace.summarize` / `trace.headline` 产出，禁止调用方自算或拼字符串；`out_of_scope=True` 的 claim 不进任何比率分母。
 11. `Verdict.rounds` 是**实际跑过的检索轮数**，不是配置值：`max_rounds` 只被钳制到 `1..3`；某类没有备用假设时恒为 `1`，有备用假设但第 2 轮也没找到证据时如实写 `2`。轮次只升不降，证据按 `evidence.id` 去重后跨轮累加，`search_trace` 同样累加。
+12. AI 只做推演：LLM 不进三态、不产定位、不写 `Verdict` 任何字段，只写 `--out` 指向的独立产物；`--llm` 为显式开关，未配置凭据时产物必须标注「未调用 AI」。
 
 ## 对应契约
 
@@ -28,6 +29,7 @@
 | C-EXTRACTOR@5 | `src/gap_engine/extractors/negation.py` | `NEGATION_MARKERS` / `extract`（显式否定声明） |
 | C-RENDERER@7 | `src/gap_engine/renderer.py` | `render` 的 `结论：` 三态文案、`换假设：{rounds} 轮` 行、局限段措辞 |
 | C-DEMO@2 | `demo/source.py`（新增）+ `demo/app.py` | `extract_zip` / `clone_github` + 四个上限常量；三种输入方式与 UI 约束 |
+| C-LLM@1 | `src/gap_engine/llm.py` + `advice.py` + `specjson.py` + `cli.py` | `LlmProvider` / `HttpLlm` / `load_provider` / `as_llm_fn`；`advice_targets` / `render_advice`；`build_spec_document` / `write_spec_json` / `load_spec_json`；`gap parse-spec` / `gap advise` |
 
 ## Challenger（规则版）
 
@@ -50,3 +52,13 @@
 - **clone 约束**：只接受 `https://github.com/<owner>/<repo>` 形式；`git clone --depth 1`，超时 120 s，`GIT_TERMINAL_PROMPT=0`；**禁止 `shell=True`**，URL 不得拼进字符串命令；超时映射为 `TimeoutError`，非零返回码映射为 `ValueError`。
 - **UI 约束**：`st.text_input` 共 3 个（服务器路径、GitHub URL、需求清单）；异常只捕获 `(OSError, ValueError)`，禁止 `except Exception`。
 - 输入源变化**不改变**三态判定与判定域规则：仍然是「识别七类、只判四类」，`architecture` / `scale` / `security` 始终 `out_of_scope`。
+
+## AI 推演（C-LLM@1）
+
+- **零依赖**：`pyproject.toml` 的 `dependencies = []` 保持不变；provider 只用标准库 `urllib.request` POST `{base_url}/chat/completions`，`llm.py` 只 import `json` / `os` / `urllib.error` / `urllib.request` / `dataclasses` / `typing`。
+- **`--llm` 显式开关**：`gap parse-spec` 与 `gap advise` 的 `--llm` 默认关闭；即使环境里有 `GAP_LLM_API_KEY`，未传 `--llm` 也**不发起任何网络请求**。凭据只从 `GAP_LLM_API_KEY` / `GAP_LLM_BASE_URL` / `GAP_LLM_MODEL` / `GAP_LLM_TIMEOUT` 读，超时解析失败回落 `30.0` 并钳制到 `(0, 120]`。
+- **无凭据标注「未调用 AI」**：`load_provider()` 读不到非空 key 时返回 `None`（不返回空 provider、不发起请求）；推演产物固定写 `- 未调用 AI（未配置 GAP_LLM_API_KEY 或未加 --llm），本批次无推演建议。`，stderr 同时提示 `未配置 GAP_LLM_API_KEY，已降级为规则解析`。
+- **AI 不进三态、不产定位**：产物里每条建议带固定标识 `> AI 推演（非证据，不产生定位，不改变三态结论）`；AI 输出不得写入 `Verdict` 的 `status` / `locator` / `evidence_ids` / `search_trace` / `reason` / `fix`，不得产生 `file:line`，不得引入第四种状态。`advise` 只挑 `status is no_evidence` 且 `out_of_scope is False` 的条目，按 `claim.id` 升序最多 `ADVICE_LIMIT = 10` 条；prompt 只含需求原文、已执行的探测项名称、已扫处数合计与缺口标签，**不含源码内容、文件路径、`Locator`**。
+- **需求清单固化（`gap-spec@1`）**：`gap parse-spec` 落盘 `{"schema": "gap-spec@1", "source", "provider", "items", "dropped"}`（键名与顺序固定，`indent=2`、`ensure_ascii=False`、末尾单换行）；`items` 的唯一来源是规则解析 `spec.parse_spec`，LLM 只做分类且结果不入盘，因此同一份清单两次解析逐字节一致；`load_spec_json` 回读时校验 `schema` 与每项类型，**不读 `provider`、不发起任何调用**。
+- **失败一律降级**：超时、非 2xx、JSON 非法、结构缺字段、`content` 非字符串，`complete` 一律返回空串，不重试、不抛异常；`as_llm_fn(None)` 返回 `None`，对账主链路不中断。
+- **产物边界**：两个子命令的产物路径只由 `--out` 决定，**六份 `reports/fx-*.md` 逐字不变**（`tests/test_fixtures.py` 守卫），既有 `analyze` / `questions` / `spec` / `score` 的参数与输出一字不改。
