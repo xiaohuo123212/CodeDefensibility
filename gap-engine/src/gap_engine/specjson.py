@@ -1,7 +1,8 @@
-"""需求清单固化：把规则解析结果落盘为 ``gap-spec@1`` JSON（C-LLM@1/specjson）。
+"""需求清单固化：把规则解析结果落盘为 ``gap-spec@1`` JSON（C-LLM@1/specjson@2）。
 
-``items`` 的唯一来源是 ``spec.parse_spec``；LLM 只参与归类，归类结果不入盘，
-因此同一份需求清单两次解析得到逐字节相同的 JSON，后续对账可只读该文件复现条目集合。
+``items`` 的 ``text`` / ``line`` / ``decidable`` 唯一来源是 ``spec.parse_spec``；
+``provider`` 非空时，模型只被用来把**不可判定条目**改写成一条可验收判据写进
+``suggestion``，并随 JSON 一起落盘固化——后续对账只读该文件、不再重算判据。
 
 运行时不以 ``llm`` 模块存在为前提：``LlmProvider`` 仅在类型检查期引用，
 有 provider 时优先借用 ``llm.as_llm_fn`` 的吞异常语义，取不到就本地等价实现。
@@ -15,7 +16,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .claimer import classify
 from .spec import SpecItem, parse_spec
 
 if TYPE_CHECKING:
@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 
 SPEC_SCHEMA = "gap-spec@1"
 PROVIDER_NONE = "none"
+CRITERIA_MAX_CHARS = 200
+CRITERIA_PROMPT = (
+    "把下面这条软件需求改写为一条可验收的量化判据。"
+    "只输出判据本身，一行，不超过 40 个汉字，不要解释，不要给文件路径或行号。\n"
+    "需求原文：{text}"
+)
 
 
 def build_spec_document(
@@ -30,14 +36,19 @@ def build_spec_document(
 ) -> dict[str, object]:
     items = parse_spec(text)
     llm_fn = _llm_fn_for(provider)
-    if llm_fn is not None:
-        for item in items:
-            classify(item.text, llm_fn)
+    payload_items: list[dict[str, object]] = []
+    for item in items:
+        suggestion = item.suggestion
+        if llm_fn is not None and not item.decidable:
+            criteria = _criteria_for(llm_fn, item.text)
+            if criteria:
+                suggestion = criteria
+        payload_items.append(_item_to_payload(item, suggestion))
     return {
         "schema": SPEC_SCHEMA,
         "source": spec_path,
         "provider": PROVIDER_NONE if provider is None else provider.name,
-        "items": [_item_to_payload(item) for item in items],
+        "items": payload_items,
         "dropped": 0,
     }
 
@@ -84,19 +95,29 @@ def _safely(provider: LlmProvider) -> Callable[[str], str]:
     def call(prompt: str) -> str:
         try:
             answer = provider.complete(prompt)
-        except Exception:  # 归类是可选增强，失败不得影响落盘
+        except Exception:  # 判据是可选增强，失败不得影响落盘
             return ""
         return answer if isinstance(answer, str) else ""
 
     return call
 
 
-def _item_to_payload(item: SpecItem) -> dict[str, object]:
+def _criteria_for(llm_fn: Callable[[str], str], text: str) -> str:
+    """取模型返回值 strip 后的第一个非空行；空串交由调用方保留规则值。"""
+    answer = llm_fn(CRITERIA_PROMPT.format(text=text))
+    for line in answer.splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate[:CRITERIA_MAX_CHARS]
+    return ""
+
+
+def _item_to_payload(item: SpecItem, suggestion: str) -> dict[str, object]:
     return {
         "text": item.text,
         "line": item.line,
         "decidable": item.decidable,
-        "suggestion": item.suggestion,
+        "suggestion": suggestion,
     }
 
 

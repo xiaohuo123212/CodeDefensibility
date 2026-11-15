@@ -145,11 +145,15 @@ python gap-engine/tools/package.py --name "对账引擎-GapEngine-<队伍名>-v1
 
 AI 只在判定**之后**做推演，不进三态、不产定位；两条命令默认都不联网，加 `--llm` 且配置了 `GAP_LLM_API_KEY` 才会调用模型（未配置时产物明确写「未调用 AI」）。引擎仍是零运行时依赖。
 
-**B 段：把需求清单固化为 JSON**（产物：`out/spec.json`，`schema` 为 `gap-spec@1`）
+**B 段：把需求清单固化为 JSON，并让模型为不可判定条目写出可验收判据**（产物：`out/spec.json`，`schema` 为 `gap-spec@1`）
 
 ```bash
 gap parse-spec gap-engine/contract/fixtures/fx-contradicted/requirements.md --out out/spec.json
+# 真正调用模型：为每条「不可判定」需求生成一条可验收判据
+GAP_LLM_API_KEY=<key> gap parse-spec gap-engine/contract/fixtures/fx-contradicted/requirements.md --out out/spec.json --llm
 ```
+
+判据规则：只有 `decidable: false` 的条目会调用模型，每条恰好一次（fx-spec 的 5 条里恰 1 条「高性能」不可判定 → 恰好 1 次调用）；模型返回的首个非空行会截断到 200 字符后写入该条 `suggestion`，返回空或调用失败则保留规则建议，`items` 的 `text` / `line` / `decidable` 不受影响。参考值：`P95 < 300ms 或 QPS ≥ 500` 会被模型改写成类似 `P95 < 300ms 且错误率 < 1%` 的判据。判据一旦落盘就固化，后续对账只读该文件、不再重算，因此同一份清单两次解析逐字节一致。
 
 **A 段：给 `no_evidence` 条目生成推演建议**（产物：`out/advice.md`）
 
@@ -163,7 +167,7 @@ gap advise gap-engine/contract/fixtures/fx-contradicted --spec gap-engine/contra
 GAP_LLM_API_KEY=<key> gap advise <repo> --spec <requirements.md> --out out/advice.md --llm
 ```
 
-产物说明：`out/spec.json` 的 `items` 只来自规则解析，同一份清单两次解析逐字节一致，后续对账可只依赖该文件复现条目集合；`out/advice.md` 的每条建议都标 `> AI 推演（非证据，不产生定位，不改变三态结论）`，无凭据时整份文件只有 `- 未调用 AI（未配置 GAP_LLM_API_KEY 或未加 --llm），本批次无推演建议。`。两条命令都**不写** `reports/` 下既有文件，六份 `reports/fx-*.md` 不受影响。退出码：成功 `0`；spec 读取失败或清单为空 `2`；`advise` 的仓库不存在 `1`。
+产物说明：`out/spec.json` 的 `text` / `line` / `decidable` 只来自规则解析，`decidable: false` 条目的 `suggestion` 在 `--llm` 时改由模型给出可验收判据并随 JSON 落盘固化——固化后同一份清单两次解析逐字节一致，后续对账可只依赖该文件复现条目集合与判据；`out/advice.md` 的每条建议都标 `> AI 推演（非证据，不产生定位，不改变三态结论）`，无凭据时整份文件只有 `- 未调用 AI（未配置 GAP_LLM_API_KEY 或未加 --llm），本批次无推演建议。`。两条命令都**不写** `reports/` 下既有文件，六份 `reports/fx-*.md` 不受影响。退出码：成功 `0`；spec 读取失败或清单为空 `2`；`advise` 的仓库不存在 `1`。
 
 ## 产物在哪
 
