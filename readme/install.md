@@ -32,7 +32,7 @@ readme\quickstart.bat              :: Windows
 gap --help
 ```
 
-应打印三个子命令：`analyze` / `questions` / `spec`。
+应打印六个子命令：`analyze` / `questions` / `spec` / `score` / `parse-spec` / `advise`。
 
 ## 可选：演示页面依赖
 
