@@ -22,6 +22,7 @@ from gap_engine.advice import (
 )
 from gap_engine.llm import ENV_API_KEY
 from gap_engine.pipeline import analyze_spec
+from gap_engine.progress import LABEL_ADVICE, ProgressEvent
 from gap_engine.schema import Claim, ClaimType, Confidence, Coverage, SearchProbe, Status, Verdict
 
 FIXTURE = Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "fx-spec"
@@ -404,3 +405,83 @@ def test_advise_with_provider_writes_sections(
     assert NO_PROVIDER_LINE not in text
     assert len(provider.calls) == 2
     assert {path.name: path.read_bytes() for path in reports_dir.glob("*.md")} == reports_before
+
+# ---------- C-LLM@1/advice@2 progress ----------
+
+
+def test_render_advice_emits_paired_events_per_model_call(tmp_path: Path) -> None:
+    provider = FakeProvider("先补 worker 数。")
+    analysis = _spec_analysis()
+    total = len(advice_targets(analysis))
+    events: list[ProgressEvent] = []
+
+    render_advice(analysis, tmp_path / "advice.md", provider, events.append)
+
+    starts = [event for event in events if event.phase == "start"]
+    dones = [event for event in events if event.phase == "done"]
+    assert total == 2
+    assert len(provider.calls) == len(starts) == len(dones) == total
+    assert [event.phase for event in events] == ["start", "done"] * total
+    assert [event.index for event in starts] == [1, 2]
+    assert all(event.total == total for event in events)
+    assert all(event.label == LABEL_ADVICE for event in events)
+    assert all(event.seconds == 0.0 for event in starts)
+
+
+def test_render_advice_without_provider_emits_no_events(tmp_path: Path) -> None:
+    events: list[ProgressEvent] = []
+    render_advice(_spec_analysis(), tmp_path / "advice.md", None, events.append)
+    assert events == []
+
+
+def test_advice_progress_does_not_change_file_bytes(tmp_path: Path) -> None:
+    events: list[ProgressEvent] = []
+    plain = render_advice(_spec_analysis(), tmp_path / "plain.md", FakeProvider("补 worker。"))
+    marked = render_advice(
+        _spec_analysis(), tmp_path / "marked.md", FakeProvider("补 worker。"), events.append
+    )
+
+    assert plain.read_bytes() == marked.read_bytes()
+    assert events
+
+
+def test_advise_cli_forced_progress_keeps_stdout_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.setattr(cli, "load_provider", lambda: FakeProvider("先补 worker 数。"))
+    out = tmp_path / "advice.md"
+
+    code = cli.main(
+        [
+            "advise",
+            str(FIXTURE),
+            "--spec",
+            str(FIXTURE / "requirements.md"),
+            "--out",
+            str(out),
+            "--llm",
+            "--progress",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.strip() == f"advice: {out}"
+    assert "[1/2]" in captured.err and "[2/2]" in captured.err
+    assert "生成建议" in captured.err
+
+
+def test_parse_spec_cli_default_progress_silent_on_pipe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    monkeypatch.setattr(cli, "load_provider", lambda: FakeProvider())
+    out = tmp_path / "spec.json"
+
+    code = cli.main(
+        ["parse-spec", str(FIXTURE / "requirements.md"), "--out", str(out), "--llm"]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.out.strip() == f"spec: {out}"
+    assert "生成判据" not in captured.err

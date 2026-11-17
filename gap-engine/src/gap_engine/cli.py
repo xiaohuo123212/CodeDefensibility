@@ -16,6 +16,7 @@ from .llm import LlmProvider, load_provider
 from .metrics import compute
 from .pipeline import analyze_repo, analyze_spec, render_spec_to, render_to
 from .priority import sort_key, weight_breakdown
+from .progress import resolve_progress
 from .review import RECEIPT_KEYS, load_receipts, score
 from .schema import (
     Claim,
@@ -69,6 +70,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parse_spec_parser.add_argument("spec")
     parse_spec_parser.add_argument("--out", required=True)
     parse_spec_parser.add_argument("--llm", action="store_true")
+    _add_progress_flag(parse_spec_parser)
 
     advise_parser = sub.add_parser(
         "advise", help="为没找到证据的条目生成 AI 推演建议（独立产物）"
@@ -77,8 +79,20 @@ def _build_parser() -> argparse.ArgumentParser:
     advise_parser.add_argument("--spec", required=True)
     advise_parser.add_argument("--out", required=True)
     advise_parser.add_argument("--llm", action="store_true")
+    _add_progress_flag(advise_parser)
 
     return parser
+
+
+def _add_progress_flag(parser: argparse.ArgumentParser) -> None:
+    """三态开关：None 按 stderr 是否交互终端自动判定。"""
+    parser.add_argument(
+        "--progress",
+        action=argparse.BooleanOptionalAction,
+        dest="progress",
+        default=None,
+        help="在 stderr 显示逐条模型调用进度（默认仅交互终端显示）",
+    )
 
 
 def _provider_for(use_llm: bool, message: str) -> LlmProvider | None:
@@ -223,7 +237,10 @@ def parse_spec_command(args: argparse.Namespace) -> int:
         return 2
 
     provider = _provider_for(args.llm, LLM_DEGRADED_MESSAGE)
-    path = write_spec_json(text, Path(args.spec).name, Path(args.out), provider)
+    progress = resolve_progress(args.progress, sys.stderr)
+    path = write_spec_json(
+        text, Path(args.spec).name, Path(args.out), provider, progress=progress
+    )
     print(f"spec: {path}")
     return 0
 
@@ -240,8 +257,9 @@ def advise_command(args: argparse.Namespace) -> int:
         return 2
 
     provider = _provider_for(args.llm, LLM_DEGRADED_MESSAGE)
+    progress = resolve_progress(args.progress, sys.stderr)
     analysis = analyze_spec(Path(args.repo), text, spec_path=Path(args.spec).name)
-    path = render_advice(analysis, Path(args.out), provider)
+    path = render_advice(analysis, Path(args.out), provider, progress=progress)
     print(f"advice: {path}")
     return 0
 

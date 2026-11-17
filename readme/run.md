@@ -169,6 +169,12 @@ GAP_LLM_API_KEY=<key> gap advise <repo> --spec <requirements.md> --out out/advic
 
 产物说明：`out/spec.json` 的 `text` / `line` / `decidable` 只来自规则解析，`decidable: false` 条目的 `suggestion` 在 `--llm` 时改由模型给出可验收判据并随 JSON 落盘固化——固化后同一份清单两次解析逐字节一致，后续对账可只依赖该文件复现条目集合与判据；`out/advice.md` 的每条建议都标 `> AI 推演（非证据，不产生定位，不改变三态结论）`，无凭据时整份文件只有 `- 未调用 AI（未配置 GAP_LLM_API_KEY 或未加 --llm），本批次无推演建议。`。两条命令都**不写** `reports/` 下既有文件，六份 `reports/fx-*.md` 不受影响。退出码：成功 `0`；spec 读取失败或清单为空 `2`；`advise` 的仓库不存在 `1`。
 
+**进度反馈（只走 stderr，不影响产物）**：真模型单条建议约 3.5s，多条时等待期间终端没有输出，容易以为卡死。`parse-spec` 与 `advise` 都支持 `--progress` / `--no-progress`，不加开关时按 `stderr.isatty()` 自动判定：交互终端显示逐条进度，管道、重定向与 CI 自动静默。每完成一条就地刷新为 `[2/2] 生成建议：提供数据可视化 ... 3.52s`，`advise` 标注「生成建议」、`parse-spec` 标注「生成判据」。进度**只写 stderr**：`--out` 产物字节与不加开关时逐字节一致，stdout 仍只有 `spec: {path}` / `advice: {path}`。需要在不带终端的 CI 里观察进度时显式加 `--progress`：
+
+```bash
+GAP_LLM_API_KEY=<key> gap advise <repo> --spec <requirements.md> --out out/advice.md --llm --progress
+```
+
 ## 产物在哪
 
 `gap-engine/reports/` 下六份报告，由对应 fixture 跑出，与 CLI 输出逐字一致（`tests/test_fixtures.py` 守卫）：

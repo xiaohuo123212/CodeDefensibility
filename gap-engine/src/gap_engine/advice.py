@@ -7,9 +7,11 @@ AI 输出只落在 `--out` 指向的独立 markdown 里：不写 ``Verdict`` 的
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .progress import LABEL_ADVICE, PHASE_DONE, PHASE_START, ProgressEvent, ProgressFn
 from .schema import Claim, Status, Verdict
 
 if TYPE_CHECKING:
@@ -44,13 +46,23 @@ def advice_targets(analysis: Any) -> list[tuple[Claim, Verdict]]:
     return targets[:ADVICE_LIMIT]
 
 
-def render_advice(analysis: Any, out: Path, provider: LlmProvider | None) -> Path:
+def render_advice(
+    analysis: Any,
+    out: Path,
+    provider: LlmProvider | None,
+    progress: ProgressFn | None = None,
+) -> Path:
     lines = [f"# {analysis.repo} 推演建议", "", ADVICE_HEADER, ""]
     if provider is None:
         lines.append(NO_PROVIDER_LINE)
     else:
-        for claim, verdict in advice_targets(analysis):
+        targets = advice_targets(analysis)
+        total = len(targets)
+        for index, (claim, verdict) in enumerate(targets, start=1):
+            _emit(progress, PHASE_START, index, total, claim.text, 0.0)
+            started = time.perf_counter()
             answer = _ask(provider, _prompt(claim, verdict)).strip()
+            _emit(progress, PHASE_DONE, index, total, claim.text, time.perf_counter() - started)
             lines.extend(
                 [
                     f"### {claim.text}",
@@ -66,6 +78,14 @@ def render_advice(analysis: Any, out: Path, provider: LlmProvider | None) -> Pat
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8", newline="\n")
     return target
+
+
+def _emit(
+    progress: ProgressFn | None, phase: str, index: int, total: int, text: str, seconds: float
+) -> None:
+    if progress is None:
+        return
+    progress(ProgressEvent(phase, index, total, LABEL_ADVICE, text, seconds))
 
 
 def _ask(provider: LlmProvider, prompt: str) -> str:

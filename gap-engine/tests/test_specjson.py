@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from gap_engine.progress import LABEL_CRITERIA, ProgressEvent
 from gap_engine.spec import SpecItem, parse_spec
 from gap_engine.specjson import (
     CRITERIA_MAX_CHARS,
@@ -309,3 +310,56 @@ def test_empty_spec_yields_empty_items(tmp_path: Path) -> None:
     assert document["items"] == []
     out = write_spec_json("标题\n", "requirements.md", tmp_path / "spec.json", None)
     assert load_spec_json(out) == []
+
+# ---------- C-LLM@1/specjson@3 progress ----------
+
+
+def test_progress_emits_paired_events_per_model_call() -> None:
+    provider = FakeProvider()
+    events: list[ProgressEvent] = []
+    total = sum(1 for item in parse_spec(SPEC_TEXT) if not item.decidable)
+
+    build_spec_document(SPEC_TEXT, "requirements.md", provider, events.append)
+
+    starts = [event for event in events if event.phase == "start"]
+    dones = [event for event in events if event.phase == "done"]
+    assert total >= 1
+    assert len(provider.calls) == len(starts) == len(dones) == total
+    assert [event.phase for event in events] == ["start", "done"] * total
+    assert [event.index for event in starts] == list(range(1, total + 1))
+    assert all(event.total == total for event in events)
+    assert all(event.label == LABEL_CRITERIA for event in events)
+    assert all(event.seconds == 0.0 for event in starts)
+    assert all(event.seconds >= 0.0 for event in dones)
+
+
+def test_progress_absent_without_provider() -> None:
+    events: list[ProgressEvent] = []
+    build_spec_document(SPEC_TEXT, "requirements.md", None, events.append)
+    assert events == []
+
+
+def test_progress_absent_when_callback_missing() -> None:
+    provider = FakeProvider()
+    document = build_spec_document(SPEC_TEXT, "requirements.md", provider)
+    assert len(provider.calls) == sum(
+        1 for item in parse_spec(SPEC_TEXT) if not item.decidable
+    )
+    assert document["provider"] == "fake-llm"
+
+
+def test_progress_does_not_change_payload_bytes(tmp_path: Path) -> None:
+    events: list[ProgressEvent] = []
+    plain = write_spec_json(
+        SPEC_TEXT, "requirements.md", tmp_path / "plain.json", FakeProvider()
+    )
+    marked = write_spec_json(
+        SPEC_TEXT,
+        "requirements.md",
+        tmp_path / "marked.json",
+        FakeProvider(),
+        progress=events.append,
+    )
+
+    assert plain.read_bytes() == marked.read_bytes()
+    assert events

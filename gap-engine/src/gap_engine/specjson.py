@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .progress import LABEL_CRITERIA, PHASE_DONE, PHASE_START, ProgressEvent, ProgressFn
 from .spec import SpecItem, parse_spec
 
 if TYPE_CHECKING:
@@ -32,15 +34,21 @@ CRITERIA_PROMPT = (
 
 
 def build_spec_document(
-    text: str, spec_path: str, provider: LlmProvider | None
+    text: str,
+    spec_path: str,
+    provider: LlmProvider | None,
+    progress: ProgressFn | None = None,
 ) -> dict[str, object]:
     items = parse_spec(text)
     llm_fn = _llm_fn_for(provider)
+    total = sum(1 for item in items if not item.decidable)
     payload_items: list[dict[str, object]] = []
+    called = 0
     for item in items:
         suggestion = item.suggestion
         if llm_fn is not None and not item.decidable:
-            criteria = _criteria_for(llm_fn, item.text)
+            called += 1
+            criteria = _criteria_for(llm_fn, item.text, progress, called, total)
             if criteria:
                 suggestion = criteria
         payload_items.append(_item_to_payload(item, suggestion))
@@ -54,11 +62,15 @@ def build_spec_document(
 
 
 def write_spec_json(
-    text: str, spec_path: str, out: Path, provider: LlmProvider | None
+    text: str,
+    spec_path: str,
+    out: Path,
+    provider: LlmProvider | None,
+    progress: ProgressFn | None = None,
 ) -> Path:
     target = Path(out)
     target.parent.mkdir(parents=True, exist_ok=True)
-    document = build_spec_document(text, spec_path, provider)
+    document = build_spec_document(text, spec_path, provider, progress)
     payload = json.dumps(document, ensure_ascii=False, indent=2) + "\n"
     # 同目录临时文件 + 替换，避免半个 JSON 覆盖既有产物
     staged = target.with_name(f"{target.name}.tmp")
@@ -102,14 +114,34 @@ def _safely(provider: LlmProvider) -> Callable[[str], str]:
     return call
 
 
-def _criteria_for(llm_fn: Callable[[str], str], text: str) -> str:
-    """取模型返回值 strip 后的第一个非空行；空串交由调用方保留规则值。"""
+def _criteria_for(
+    llm_fn: Callable[[str], str],
+    text: str,
+    progress: ProgressFn | None = None,
+    index: int = 0,
+    total: int = 0,
+) -> str:
+    """取模型返回值 strip 后的第一个非空行；空串交由调用方保留规则值。
+
+    ``llm_fn`` 自身吞异常，故 ``start`` / ``done`` 必然成对发出。
+    """
+    _emit(progress, PHASE_START, index, total, text, 0.0)
+    started = time.perf_counter()
     answer = llm_fn(CRITERIA_PROMPT.format(text=text))
+    _emit(progress, PHASE_DONE, index, total, text, time.perf_counter() - started)
     for line in answer.splitlines():
         candidate = line.strip()
         if candidate:
             return candidate[:CRITERIA_MAX_CHARS]
     return ""
+
+
+def _emit(
+    progress: ProgressFn | None, phase: str, index: int, total: int, text: str, seconds: float
+) -> None:
+    if progress is None:
+        return
+    progress(ProgressEvent(phase, index, total, LABEL_CRITERIA, text, seconds))
 
 
 def _item_to_payload(item: SpecItem, suggestion: str) -> dict[str, object]:
