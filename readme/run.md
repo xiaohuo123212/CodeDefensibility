@@ -16,6 +16,12 @@ gap spec gap-engine/contract/fixtures/fx-contradicted --spec gap-engine/contract
 
 默认产物 `reports/<repo 名>-spec.md`，可用 `--out <path>` 指定。需求清单是 Markdown 列表（`- ` / `* ` / `+ ` / `1. ` / `1) ` / `- [ ] ` 开头）；解析不出条目时退出码为 2，不生成空报告。
 
+**判定域**：只判 `performance` / `concurrency` / `feature` / `testing` 四类；`architecture` / `scale` / `security` 三类需求不判定——报告里该条写 `结论：不判定（超出判定域…）` 与 `audit effort：0 类 0 处`，不输出「查到 / 查过没找到」，不进三态计数、不计入覆盖率与 `## 未覆盖`；概览另起一行 `- 其中 N 条超出判定域，不判定`（N 为 0 时不显示）。
+
+**排除生成目录与自定义忽略**：`build`、`build-*`、`cmake-build-*`、`CMakeFiles`、`node_modules`、`_archive` 等目录按目录名排除（大小写不敏感），生成目录里的编译器探测文件不再进索引。要把自己仓库的路径排除在外，在**被测仓库根**放一份 `.ignore`，逐行写相对路径或含 `*` 的通配（如 `docs/generated/*`、`*.min.js`）；空行与 `#` 注释被忽略，只认仓库根这一份，不支持 `!` 否定。
+
+**「查过 N 处」的两个口径**：`#### 查过 N 处` 的 N 是按需求累加的扫描次数（等于各条 `audit effort` 之和）；同一探测项被多条需求重复扫描时，紧跟一行 `- 其中不同位置 M 处` 给出按探测项去重后的不同位置数。两数相等时不显示该行。
+
 ## 2. 自我声称核对（副模式）
 
 ```bash
@@ -29,6 +35,9 @@ gap analyze gap-engine/contract/fixtures/fx-feature
 ```
 
 默认产物 `reports/report.md`；`--out` 改路径，`--max-claims N` 控制条数，`--json <path>` 另存结构化结果。
+
+两种模式的报告首段「项目实际是什么」的一句话，按入口三分支输出：`{入口} 暴露 {n} 个路由` / `{入口} 未见路由定义` / `未识别到启动入口`。未识别到启动入口时显示 `未识别到启动入口`，不再把行数最多的文件当作入口文件。`spec` 模式多行段的 `入口：` 行与这句话同口径：只列真正带路由定义的文件，没有路由就写 `未识别到启动入口`，不再出现「入口列了三个文件、一句话却说没识别到入口」的自相矛盾。
+
 
 ## 3. 本地演示页面
 

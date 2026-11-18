@@ -14,7 +14,25 @@ from ..index import RepoIndex
 from ..schema import ClaimType, Evidence, EvidenceKind, Strength
 
 SNIPPET_LIMIT = 120
-CODE_SUFFIXES = frozenset({".py", ".js", ".ts", ".tsx", ".jsx", ".java"})
+CODE_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".js",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".java",
+        ".cs",
+        ".kt",
+        ".kts",
+        ".scala",
+        ".go",
+        ".rs",
+        ".rb",
+        ".php",
+        ".swift",
+    }
+)
 CONFIG_SUFFIXES = frozenset({".conf", ".cfg", ".ini", ".toml", ".yaml", ".yml", ".json", ".sh"})
 SCAN_SUFFIXES = CODE_SUFFIXES | CONFIG_SUFFIXES
 SOURCE_LIMIT = 1_000_000
@@ -52,7 +70,18 @@ def _line_text(index: RepoIndex, p: Path, line: int, fallback: str = "") -> str:
     return fallback
 
 
-from . import artifact, bench, concurrency, config, deps, entry, negation, structure, tests  # noqa: E402
+from . import (  # noqa: E402
+    artifact,
+    bench,
+    concurrency,
+    config,
+    deps,
+    entry,
+    negation,
+    structure,
+    symbols,
+    tests,
+)
 
 EXTRACTORS: dict[str, Callable[[RepoIndex], list[Evidence]]] = {
     "structure": structure.extract,
@@ -64,6 +93,7 @@ EXTRACTORS: dict[str, Callable[[RepoIndex], list[Evidence]]] = {
     "config": config.extract,
     "artifact": artifact.extract,
     "negation": negation.extract,
+    "symbols": symbols.extract,
 }
 
 __all__ = ["EXTRACTORS"]

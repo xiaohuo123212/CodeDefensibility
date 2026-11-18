@@ -13,6 +13,7 @@ from typing import Any
 
 from .schema import Claim, Coverage, Status, Verdict
 from .spec import default_criteria
+from .trace import distinct_scanned
 
 
 STATUS_CN: dict[Status, str] = {
@@ -79,6 +80,20 @@ def _overview_line(verdicts: list[Verdict], unit: str = "声称") -> str:
     return f"#### 查过 {total} 处（{len(verdicts)} 条{unit}，{classes} 类探测项）"
 
 
+def _dedup_note(verdicts: list[Verdict]) -> list[str]:
+    """补一行去重口径（C-RENDERER@9）：累加数不变，额外给出不同位置数。
+
+    两者相等时不输出，既有报告逐字不变；同一探测项被多条需求重复扫描时
+    才出现，避免「查过 N 处」被读成 N 个不同位置。
+    """
+    trace = [probe for verdict in verdicts for probe in verdict.search_trace]
+    total = sum(probe.scanned for probe in trace)
+    distinct = distinct_scanned(trace)
+    if distinct >= total:
+        return []
+    return [f"- 其中不同位置 {distinct} 处（同一探测项被多条需求重复扫描时只计一次）", ""]
+
+
 def _status_line(statuses: list[Status]) -> str:
     counts = Counter(statuses)
     return (
@@ -86,6 +101,12 @@ def _status_line(statuses: list[Status]) -> str:
         f"没找到证据 {counts[Status.no_evidence]} 条 / "
         f"有反证 {counts[Status.contradicted]} 条"
     )
+
+
+def _scope_note(pairs: list[tuple[Claim, Verdict]]) -> list[str]:
+    """判定域外的条目不进三态统计，单列一行说明，避免与「没找到证据」混淆。"""
+    out_of_scope = sum(1 for claim, _ in pairs if claim.out_of_scope)
+    return [f"- 其中 {out_of_scope} 条超出判定域，不判定", ""] if out_of_scope else []
 
 
 def _probe_groups(verdict: Verdict) -> tuple[list[str], list[str]]:
@@ -101,6 +122,17 @@ def _probe_groups(verdict: Verdict) -> tuple[list[str], list[str]]:
 
 
 def _claim_block(claim: Claim, verdict: Verdict) -> list[str]:
+    if claim.out_of_scope:
+        return [
+            f"### {claim.text}",
+            "",
+            f"结论：不判定（{verdict.reason}）",
+            "",
+            f"该补什么：{verdict.fix}",
+            "",
+            "audit effort：0 类 0 处",
+            "",
+        ]
     hit_lines, miss_lines = _probe_groups(verdict)
 
     conclusion = _conclusion_of(verdict)
@@ -156,7 +188,8 @@ def _uncovered_lines(pairs: list[tuple[Claim, Verdict]]) -> list[str]:
     uncovered = [
         claim
         for claim, verdict in pairs
-        if verdict.coverage is Coverage.none or not verdict.search_trace
+        if not claim.out_of_scope
+        and (verdict.coverage is Coverage.none or not verdict.search_trace)
     ]
     if not uncovered:
         return ["- 无", ""]
@@ -212,8 +245,10 @@ def render(
         lines += [
             _overview_line([verdict for _, verdict in pairs]),
             "",
-            _status_line([verdict.status for _, verdict in pairs]),
+            *_dedup_note([verdict for _, verdict in pairs]),
+            _status_line([v.status for c, v in pairs if not c.out_of_scope]),
             "",
+            *_scope_note(pairs),
             "## 逐条",
             "",
         ]
@@ -285,8 +320,10 @@ def render_spec(
         "",
         _overview_line(verdicts, "需求"),
         "",
-        _status_line([verdict.status for _, verdict in pairs]),
+        *_dedup_note(verdicts),
+        _status_line([v.status for c, v in pairs if not c.out_of_scope]),
         "",
+        *_scope_note(pairs),
         "## 逐条",
         "",
     ]

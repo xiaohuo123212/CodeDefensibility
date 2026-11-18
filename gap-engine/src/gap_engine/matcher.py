@@ -185,9 +185,35 @@ def claim_terms(text: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
-def _mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
+_LATIN_TERM_RE: dict[str, re.Pattern[str]] = {}
+
+
+def _latin_pattern(term: str) -> re.Pattern[str]:
+    # 下划线视为分词符：``_export_rows`` 里的 export 是独立词元，
+    # 而 ``getlevelnamesmapping`` 里的 eln 只是字母连写，不算命中。
+    pattern = _LATIN_TERM_RE.get(term)
+    if pattern is None:
+        pattern = re.compile(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])")
+        _LATIN_TERM_RE[term] = pattern
+    return pattern
+
+
+def mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
+    """证据是否提到任一关键词（C-MATCHER@6）。
+
+    纯 ASCII 词按**词边界**匹配：需求里的 ``.eln`` 会切出 ``eln``，裸子串会命中
+    ``channel`` / ``internal`` 这类无关标识符；边界匹配后只有真正的独立词
+    （``foo.eln`` 的 ``eln``、``target``）才算命中。中文仍按子串匹配——
+    中文没有词边界概念，且子串匹配是既有判定依赖的语义。
+    """
     haystack = f"{evidence.file} {evidence.snippet}".lower()
-    return any(term in haystack for term in terms)
+    for term in terms:
+        if term.isascii():
+            if _latin_pattern(term.lower()).search(haystack):
+                return True
+        elif term in haystack:
+            return True
+    return False
 
 
 def _is_negation(evidence: Evidence) -> bool:
@@ -281,7 +307,7 @@ def judge(
 
     terms = claim_terms(claim.text)
     if terms:
-        negations = [e for e in relevant if _is_negation(e) and _mentions(e, terms)]
+        negations = [e for e in relevant if _is_negation(e) and mentions(e, terms)]
         anchor = _strongest([e for e in negations if e.line is not None])
         if anchor is not None:
             supports = [e for e in relevant if not _is_negation(e)]
@@ -327,21 +353,33 @@ def judge(
         )
 
     if claim.type is ClaimType.feature:
-        terms = feature_terms(claim.text)
-        if terms:
-            relevant = [e for e in relevant if _mentions(e, terms)]
-            if not relevant:
-                return _verdict(
-                    claim,
-                    Status.no_evidence,
-                    Confidence.low,
-                    None,
-                    _coverage(trace),
-                    [],
-                    "未找到与该功能关键词相关的实现",
-                    trace,
-                    rounds,
-                )
+        # feature_terms 非空时不得混入 claim_terms，否则已正确的判定会漂移
+        terms = feature_terms(claim.text) or claim_terms(claim.text)
+        if not terms:
+            return _verdict(
+                claim,
+                Status.no_evidence,
+                Confidence.low,
+                None,
+                _coverage(trace),
+                [],
+                "需求文本无可用于匹配的关键词",
+                trace,
+                rounds,
+            )
+        relevant = [e for e in relevant if mentions(e, terms)]
+        if not relevant:
+            return _verdict(
+                claim,
+                Status.no_evidence,
+                Confidence.low,
+                None,
+                _coverage(trace),
+                [],
+                "未找到与该功能关键词相关的实现",
+                trace,
+                rounds,
+            )
 
     if claim.type is ClaimType.testing and not _has_coverage_artifact(relevant):
         return _verdict(

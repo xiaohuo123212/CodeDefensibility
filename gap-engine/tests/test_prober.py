@@ -1,4 +1,5 @@
-"""C-PROBER@1 / C-PROBER@6：计划完整性、零命中仍留轨迹、scanned>=hits。
+"""C-PROBER@1 / C-PROBER@6 / C-PROBER@7：计划完整性、零命中仍留轨迹、scanned>=hits、
+feature 收窄与判定层同口径。
 
 末尾几条覆盖 C-BASELINE@1 的缺文件回退（任务 T4 要求的最小回归）。
 """
@@ -10,6 +11,7 @@ from pathlib import Path
 from gap_engine.baseline import PREVALENCE, PREVALENCE_THRESHOLD, is_prevalent, load_prevalence
 from gap_engine.extractors import EXTRACTORS
 from gap_engine.index import build_index
+from gap_engine.matcher import claim_terms, feature_terms
 from gap_engine.prober import (
     ALTERNATE_PLANS,
     CANDIDATE_FILES,
@@ -276,12 +278,51 @@ def test_fx_spec_feature_claims_no_longer_share_where_sets() -> None:
     assert visualization["路由/入口"] != login["路由/入口"]
 
 
-def test_feature_claim_without_terms_keeps_class_level_hits() -> None:
+def test_feature_claim_without_any_terms_keeps_class_level_hits() -> None:
     index = build_index(FIXTURES / "fx-spec")
-    probes, _ = run(_claim(ClaimType.feature, "支持多语言"), index)
+    assert feature_terms("OK") == ()
+    assert claim_terms("OK") == ()
+
+    probes, _ = run(_claim(ClaimType.feature, "OK"), index)
     router = {probe.probe: probe for probe in probes}["路由/入口"]
 
     assert router.hits >= 1
+
+
+def test_feature_narrowing_falls_back_to_claim_terms() -> None:
+    index = build_index(FIXTURES / "fx-spec")
+    assert feature_terms("支持多语言") == ()
+    assert claim_terms("支持多语言") == ("多语言",)
+
+    probes, _ = run(_claim(ClaimType.feature, "支持多语言"), index)
+
+    assert all(probe.hits == 0 for probe in probes), "兜底关键词在 fx-spec 中不存在，不应报出类级命中"
+
+
+def test_feature_implementation_probe_moves_to_symbols() -> None:
+    impl = {spec.probe: spec for spec in PLAN[ClaimType.feature]}["相关实现"]
+
+    assert impl == ProbeSpec("相关实现", "symbols", "按模块划分的实现文件", ())
+
+
+def test_symbols_candidate_files_cover_every_symbol_suffix() -> None:
+    assert CANDIDATE_FILES["symbols"] == (
+        "*.py,*.js,*.jsx,*.ts,*.tsx,*.java,*.cs,*.kt,*.kts,*.scala,"
+        "*.go,*.rs,*.rb,*.php,*.swift,*.c,*.h,*.cc,*.cpp,*.cxx,*.hpp,*.hh,*.hxx"
+    )
+
+
+def test_fx_spec_feature_implementation_probe_hits_symbol_lines() -> None:
+    index = build_index(FIXTURES / "fx-spec")
+    claims = _fx_spec_claims()
+    impl = {p.probe: p for p in run(claims["支持 Excel 导出"], index)[0]}["相关实现"]
+
+    assert impl.hits >= 1
+    lines = (FIXTURES / "fx-spec" / "app.py").read_text(encoding="utf-8").splitlines()
+    for loc in impl.where:
+        assert loc.startswith("app.py:")
+        line = lines[int(loc.rsplit(":", 1)[1]) - 1]
+        assert "def " in line or "class " in line, loc
 
 
 def test_prevalence_falls_back_when_file_missing(tmp_path: Path) -> None:
@@ -420,3 +461,26 @@ def test_negation_probe_leaves_existing_fixtures_untouched() -> None:
         assert negation.hits == 0, fixture
         assert negation.where == [], fixture
         assert negation.scanned > 0, fixture
+
+def test_feature_narrowing_reuses_word_boundary(tmp_path: Path) -> None:
+    """C-PROBER@8：收窄用 matcher.mentions，短词不得命中标识符内部。"""
+    (tmp_path / "logging.py").write_text("def getLevelNamesMapping():\n    pass\n", encoding="utf-8")
+    (tmp_path / "runner.py").write_text("class _writeLnDecorator:\n    pass\n", encoding="utf-8")
+    index = build_index(tmp_path)
+
+    probes, _ = run(_claim(ClaimType.feature, "支持 .eln 写实现"), index)
+    impl = {probe.probe: probe for probe in probes}["相关实现"]
+
+    assert impl.hits == 0
+    assert impl.where == []
+
+
+def test_feature_narrowing_still_hits_real_word(tmp_path: Path) -> None:
+    (tmp_path / "impl.py").write_text("def _run(eln, tu):\n    pass\n", encoding="utf-8")
+    index = build_index(tmp_path)
+
+    probes, _ = run(_claim(ClaimType.feature, "支持 .eln 写实现"), index)
+    impl = {probe.probe: probe for probe in probes}["相关实现"]
+
+    assert impl.hits == 1
+    assert impl.where == ["impl.py:1"]

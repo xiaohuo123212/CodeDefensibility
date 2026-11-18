@@ -13,7 +13,7 @@ from .index import RepoIndex, build_index
 from .metrics import compute
 from .priority import compute_question_priority
 from .renderer import render, render_spec
-from .schema import Claim, Evidence, Status, Strength, Verdict, is_judgeable
+from .schema import Claim, Confidence, Coverage, Evidence, Status, Strength, Verdict, is_judgeable
 from .spec import SpecItem, claims_from_spec, parse_spec
 
 _ROUTE_RE = re.compile(
@@ -53,7 +53,28 @@ def _merge_evidence(evidence: list[Evidence]) -> list[Evidence]:
     return list(deduped.values())
 
 
+OOS_REASON = "超出判定域：架构 / 规模 / 安全类需求不在本次判定范围"
+
+
+def _scope_verdict(claim: Claim) -> Verdict:
+    """判定域外的需求不跑探针、不进三态（C-PIPELINE@7）。"""
+    return Verdict(
+        claim_id=claim.id,
+        status=Status.no_evidence,
+        confidence=Confidence.low,
+        locator=None,
+        coverage=Coverage.none,
+        evidence_ids=[],
+        reason=OOS_REASON,
+        search_trace=[],
+        rounds=1,
+        fix="不补：本条不在判定域内，不计入对账结论、覆盖率与 audit effort。",
+    )
+
+
 def _judge_one(claim: Claim, index: RepoIndex, max_rounds: int) -> Verdict:
+    if claim.out_of_scope:
+        return _scope_verdict(claim)
     cap = max(1, min(3, max_rounds))
     probes, evidence = prober.run(claim, index, 1)
     trace = list(probes)
@@ -102,7 +123,7 @@ def _overview(index: RepoIndex) -> tuple[str, ...]:
     n_files = len(index.files)
     loc = sum(len(index.read(path).splitlines()) for path in index.files)
 
-    entries = _dedup([evidence.file for evidence in EXTRACTORS["entry"](index)])
+    entries = _route_files(index)
     deps = _dedup([evidence.snippet.strip() for evidence in EXTRACTORS["deps"](index)])
     n_tests = _test_file_count(index)
 
@@ -123,16 +144,28 @@ def _route_of(snippet: str) -> str:
     return f"{method} {path}"
 
 
+def _route_hits(index: RepoIndex) -> list[Evidence]:
+    """带路由定义的入口证据；低强度线索（``__main__``、``app.run(``）不算入口。"""
+    return [
+        evidence
+        for evidence in sorted(
+            (e for e in EXTRACTORS["entry"](index) if e.strength is not Strength.low),
+            key=lambda e: (e.file, e.line),
+        )
+        if _route_of(evidence.snippet)
+    ]
+
+
+def _route_files(index: RepoIndex) -> list[str]:
+    return _dedup([evidence.file for evidence in _route_hits(index)])
+
+
 def _routes_and_entry(index: RepoIndex) -> tuple[tuple[str, ...], str]:
-    hits = sorted(
-        (e for e in EXTRACTORS["entry"](index) if e.strength is not Strength.low),
-        key=lambda e: (e.file, e.line),
-    )
     routes: list[str] = []
     entry_file = ""
-    for evidence in hits:
+    for evidence in _route_hits(index):
         route = _route_of(evidence.snippet)
-        if not route or route in routes:
+        if route in routes:
             continue
         routes.append(route)
         if not entry_file:
@@ -140,23 +173,19 @@ def _routes_and_entry(index: RepoIndex) -> tuple[tuple[str, ...], str]:
     return tuple(routes), entry_file
 
 
-def _structure_entry(index: RepoIndex) -> str:
-    for evidence in EXTRACTORS["structure"](index):
-        if evidence.file:
-            return Path(evidence.file).name
-    return "未找到入口文件"
-
-
 def _facts(index: RepoIndex) -> tuple[tuple[str, ...], str]:
     routes, entry_file = _routes_and_entry(index)
-    if not entry_file:
-        entry_file = _structure_entry(index)
 
     deps = _dedup([evidence.snippet.strip() for evidence in EXTRACTORS["deps"](index)])
     dependency = f"依赖 {len(deps)} 个（{', '.join(deps[:2])}）" if deps else "依赖 0 个"
     n_tests = _test_file_count(index)
 
-    head = f"{entry_file} 暴露 {len(routes)} 个路由" if routes else f"{entry_file} 未见路由定义"
+    if routes:
+        head = f"{entry_file} 暴露 {len(routes)} 个路由"
+    elif entry_file:
+        head = f"{entry_file} 未见路由定义"
+    else:
+        head = "未识别到启动入口"
     return routes, f"{head}；{dependency}；{n_tests} 个测试文件。"
 
 

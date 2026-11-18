@@ -243,3 +243,39 @@ def test_unknown_command_returns_two(capsys) -> None:
     captured = capsys.readouterr()
     assert code == 2
     assert "usage" in captured.err
+
+def test_overview_entry_line_ignores_non_route_entry_evidence(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "script.py").write_text(
+        'import sys\n\n\nif __name__ == "__main__":\n    sys.exit(0)\n', encoding="utf-8"
+    )
+    out = tmp_path / "out" / "repo-spec.md"
+
+    assert cli.main(["spec", str(repo), "--spec", str(_spec(tmp_path)), "--out", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+
+    assert "- 入口：未识别到启动入口" in text
+    assert "- 一句话：未识别到启动入口；" in text
+
+
+def test_overview_entry_line_lists_route_files(tmp_path: Path) -> None:
+    out = tmp_path / "out" / "repo-spec.md"
+
+    assert cli.main(["spec", str(_repo(tmp_path)), "--spec", str(_spec(tmp_path)), "--out", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+
+    assert "- 入口：app.py" in text
+    assert "- 一句话：app.py 暴露 1 个路由；" in text
+
+def test_spec_marks_out_of_scope_requirement_as_not_judged(tmp_path: Path) -> None:
+    spec = _spec(tmp_path, "- 支持 VS Code 编辑器插件\n- 支持导出\n")
+    out = tmp_path / "out" / "repo-spec.md"
+
+    assert cli.main(["spec", str(_repo(tmp_path)), "--spec", str(spec), "--out", str(out)]) == 0
+    text = out.read_text(encoding="utf-8")
+
+    assert "结论：不判定（超出判定域" in text
+    assert "- 其中 1 条超出判定域，不判定" in text
+    assert "支持 VS Code 编辑器插件：没有找到任何可查痕迹" not in text
+    assert "audit effort：0 类 0 处" in text

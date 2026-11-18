@@ -4,7 +4,8 @@
 让报告的 audit effort 可被对手复核。``where_contains`` 让每个探测项只报告
 它真正在找的那类证据；``path_only`` 用于"某类文件在不在仓库里"这类探测项，
 只看路径、不看文件内文本；feature 类还要按需求关键词再收窄，避免不同功能
-需求报出同一批命中。第 2 轮起改用 ``ALTERNATE_PLANS`` 里的换假设计划（表驱动、可枚举）。
+需求报出同一批命中——收窄与判定层同口径，``feature_terms`` 无词时回落到
+``claim_terms``。第 2 轮起改用 ``ALTERNATE_PLANS`` 里的换假设计划（表驱动、可枚举）。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from fnmatch import fnmatch
 
 from .extractors import EXTRACTORS
 from .index import RepoIndex
-from .matcher import feature_terms
+from .matcher import claim_terms, feature_terms, mentions
 from .schema import Claim, ClaimType, Evidence, SearchProbe
 
 
@@ -88,7 +89,7 @@ PLAN: dict[ClaimType, tuple[ProbeSpec, ...]] = {
             ("requirements", "pyproject.toml", "package.json"),
             path_only=True,
         ),
-        ProbeSpec("相关实现", "structure", "按模块划分的实现文件", ("def ", "class ")),
+        ProbeSpec("相关实现", "symbols", "按模块划分的实现文件", ()),
         ProbeSpec("测试覆盖", "tests", "对应测试文件", ("test_", "_test.")),
         ProbeSpec("否定/未实现声明", "negation", "显式否定与未实现声明"),
     ),
@@ -147,6 +148,10 @@ CANDIDATE_FILES: dict[str, str] = {
         "*.py,*.js,*.ts,*.tsx,*.jsx,*.java,*.go,*.rb,*.sh,"
         "*.md,*.txt,*.toml,*.cfg,*.ini,*.yaml,*.yml"
     ),
+    "symbols": (
+        "*.py,*.js,*.jsx,*.ts,*.tsx,*.java,*.cs,*.kt,*.kts,*.scala,"
+        "*.go,*.rs,*.rb,*.php,*.swift,*.c,*.h,*.cc,*.cpp,*.cxx,*.hpp,*.hh,*.hxx"
+    ),
 }
 
 
@@ -198,10 +203,11 @@ def run(
 
         # 类级过滤只区分"路由/依赖"这类，feature 还需按需求关键词收窄，
         # 否则「可视化」与「登录」会报出同一批命中，与 no_evidence 结论冲突。
+        # 收窄复用 matcher.mentions，保证与判定层同口径（C-PROBER@8）。
         if claim.type is ClaimType.feature:
-            terms = feature_terms(claim.text)
+            terms = feature_terms(claim.text) or claim_terms(claim.text)
             if terms:
-                items = [item for item in items if any(t in f"{item.file} {item.snippet}".lower() for t in terms)]
+                items = [item for item in items if mentions(item, terms)]
 
         hits = [item for item in items if claim.type in item.supports]
         where: list[str] = []

@@ -21,6 +21,7 @@ from gap_engine.matcher import (
     fix,
     gap_label,
     judge,
+    mentions,
     question,
 )
 from gap_engine.schema import (
@@ -126,16 +127,23 @@ def test_testing_with_coverage_artifact_is_supported() -> None:
     assert verdict.confidence is Confidence.high
 
 
-def test_feature_claim_with_evidence_is_supported() -> None:
-    evidence = [_evidence(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5)]
-    verdict = judge(_claim(ClaimType.feature), evidence, _trace())
-    assert verdict.status is Status.supported
-    assert verdict.confidence is Confidence.medium
+def test_feature_without_feature_terms_falls_back_to_claim_terms() -> None:
+    claim = _claim(ClaimType.feature)
+    assert feature_terms(claim.text) == ()
+    assert claim_terms(claim.text) == ("某能力",)
 
-    evidence.append(_evidence(EvidenceKind.dep, [ClaimType.feature], Strength.medium, "req.txt", 2))
-    assert judge(_claim(ClaimType.feature), evidence, _trace()).confidence is Confidence.medium
+    evidence = [_evidence(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5)]
+    verdict = judge(claim, evidence, _trace())
+    assert verdict.status is Status.no_evidence
+    assert verdict.confidence is Confidence.low
+    assert verdict.locator is None
+    assert verdict.evidence_ids == []
+    assert verdict.reason == "未找到与该功能关键词相关的实现"
     assert verdict.search_trace == _trace()
     assert verdict.rounds == 1
+
+    evidence.append(_evidence(EvidenceKind.dep, [ClaimType.feature], Strength.medium, "req.txt", 2))
+    assert judge(claim, evidence, _trace()).status is Status.no_evidence
 
 
 def test_judge_without_negation_markers_keeps_original_statuses() -> None:
@@ -276,16 +284,34 @@ def test_feature_keyword_match_keeps_evidence_but_locator_skips_dependency() -> 
     assert verdict.evidence_ids == [dep.id, code.id]
 
 
-def test_feature_without_terms_behaves_like_d1() -> None:
-    claim = _claim(ClaimType.feature, "支持多语言")
+def test_feature_without_any_terms_is_no_evidence() -> None:
+    claim = _claim(ClaimType.feature, "支持")
+    assert feature_terms(claim.text) == ()
+    assert claim_terms(claim.text) == ()
+
     evidence = [
         _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5, 'app = Flask(__name__)')
     ]
     verdict = judge(claim, evidence, _trace())
 
+    assert verdict.status is Status.no_evidence
+    assert verdict.confidence is Confidence.low
+    assert verdict.locator is None
+    assert verdict.evidence_ids == []
+    assert verdict.reason == "需求文本无可用于匹配的关键词"
+    assert verdict.coverage is Coverage.full
+
+
+def test_feature_fallback_terms_keep_matching_evidence_supported() -> None:
+    claim = _claim(ClaimType.feature, "支持多语言")
+    evidence = [
+        _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "i18n.py", 3, "多语言资源已加载")
+    ]
+    verdict = judge(claim, evidence, _trace())
+
     assert verdict.status is Status.supported
     assert verdict.locator is not None
-    assert verdict.locator.file == "app.py"
+    assert verdict.locator.file == "i18n.py"
 
 
 def test_dependency_declaration_detection() -> None:
@@ -438,3 +464,35 @@ def test_contradicted_labels_and_texts() -> None:
 def test_matcher_docstring_no_longer_promises_no_contradicted() -> None:
     source = Path(matcher_module.__file__).read_text(encoding="utf-8")
     assert "永不产出" not in source
+
+def test_mentions_requires_ascii_word_boundary() -> None:
+    noise = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.low,
+        "editors/vscode/runtime/Lib/logging/__init__.py",
+        126,
+        "def getLevelNamesMapping():",
+    )
+    assert not mentions(noise, ("eln",))
+
+    real = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.low,
+        "tests/cases/test_alloc_and_sizes.py",
+        23,
+        "def _run(eln, tu, *args):",
+    )
+    assert mentions(real, ("eln",))
+
+    route = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 7, '@app.get("/export")')
+    assert mentions(route, ("export",))
+    assert not mentions(route, ("xport",))
+
+
+def test_mentions_keeps_cjk_substring_matching() -> None:
+    ev = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "i18n.py", 3, "多语言资源已加载")
+
+    assert mentions(ev, ("多语言",))
+    assert not mentions(ev, ("用户登录",))

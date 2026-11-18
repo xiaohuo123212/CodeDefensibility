@@ -614,3 +614,25 @@ def test_contradicted_block_has_no_rounds_line(tmp_path: Path) -> None:
 
     assert "换假设：" not in text
     assert "- 定位：app.py:1" in text
+
+def test_overview_adds_distinct_positions_only_when_shared(tmp_path: Path) -> None:
+    shared = SearchProbe(
+        probe="相关实现", target="按模块划分的实现文件", scanned=10, hits=0, where=[]
+    )
+    claims = [_claim("c01", "需求一"), _claim("c02", "需求二")]
+    verdicts = [_verdict("c01", [shared]), _verdict("c02", [shared])]
+
+    out = render_spec(_analysis([], claims, verdicts), tmp_path / "spec.md")
+    text = out.read_text(encoding="utf-8")
+
+    assert _overview_of(text) == "#### 查过 20 处（2 条需求，1 类探测项）"
+    assert "- 其中不同位置 10 处（同一探测项被多条需求重复扫描时只计一次）\n" in text
+
+
+def test_overview_omits_distinct_line_when_no_duplicate(tmp_path: Path) -> None:
+    trace = [SearchProbe(probe="压测脚本", target="t", scanned=5, hits=0, where=[])]
+    out = render([_verdict("c01", trace)], [_claim("c01", "某声称")], tmp_path / "r.md", "repo")
+    text = out.read_text(encoding="utf-8")
+
+    assert _overview_of(text) == "#### 查过 5 处（1 条声称，1 类探测项）"
+    assert "其中不同位置" not in text
