@@ -1,4 +1,4 @@
-"""C-LLM@1/specjson@2：gap-spec@1 文档构造、不可判定条目判据生成、落盘与回读。"""
+"""C-LLM@1/specjson@2/@4：gap-spec@1 文档构造、不可判定条目判据生成、落盘与回读。"""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from gap_engine.specjson import (
     CRITERIA_PROMPT,
     PROVIDER_NONE,
     SPEC_SCHEMA,
+    _CRITERIA_CHECK_RE,
     build_spec_document,
     load_spec_json,
     write_spec_json,
@@ -149,11 +150,53 @@ def test_criteria_takes_first_non_empty_line() -> None:
 
 
 def test_criteria_truncated_to_max_chars() -> None:
-    provider = FakeProvider(answer="长" * (CRITERIA_MAX_CHARS + 50))
+    provider = FakeProvider(answer="长" * (CRITERIA_MAX_CHARS + 50) + "，P95 < 300ms")
     document = build_spec_document("- 高性能\n", "requirements.md", provider)
     suggestion = document["items"][0]["suggestion"]  # type: ignore[index]
     assert suggestion == "长" * CRITERIA_MAX_CHARS
     assert len(suggestion) == CRITERIA_MAX_CHARS
+
+
+# ---------- C-LLM@1/specjson@4 判据校验 ----------
+
+
+def test_criteria_check_re_matches_threshold_and_file_locator_forms() -> None:
+    for text in (
+        "支持 500 并发用户",
+        "延迟 ≤ 200ms",
+        "P95 < 1s",
+        "覆盖 3 类场景",
+        "见 file:src/a.py:9",
+    ):
+        assert _CRITERIA_CHECK_RE.search(text), text
+    for text in ("系统满足等保三级安全要求", "系统支持配置热更新功能", ""):
+        assert _CRITERIA_CHECK_RE.search(text) is None, text
+
+
+def test_criteria_without_threshold_or_locator_keeps_rule_suggestion() -> None:
+    rule_items = build_spec_document("- 高性能\n", "requirements.md", None)["items"]
+    for answer in ("系统满足等保三级安全要求\n", "系统支持配置热更新功能\n", "高性能\n"):
+        document = build_spec_document("- 高性能\n", "requirements.md", FakeProvider(answer))
+        assert document["items"] == rule_items, answer
+
+
+def test_criteria_skips_non_matching_lines_before_accepted_line() -> None:
+    provider = FakeProvider(answer="系统满足等保三级安全要求\nP95 < 300ms，错误率 < 1%\n")
+    document = build_spec_document("- 高性能\n", "requirements.md", provider)
+    assert document["items"] == [
+        {
+            "text": "高性能",
+            "line": 1,
+            "decidable": False,
+            "suggestion": "P95 < 300ms，错误率 < 1%",
+        }
+    ]
+
+
+def test_criteria_accepts_file_locator_answer() -> None:
+    provider = FakeProvider(answer="审计开关见 file:config/audit.yaml")
+    document = build_spec_document("- 高性能\n", "requirements.md", provider)
+    assert document["items"][0]["suggestion"] == "审计开关见 file:config/audit.yaml"  # type: ignore[index]
 
 
 def test_blank_answer_keeps_rule_suggestion() -> None:

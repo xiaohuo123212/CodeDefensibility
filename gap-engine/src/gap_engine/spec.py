@@ -1,4 +1,4 @@
-"""需求清单解析与可判定性预检（C-SPEC@1）。
+"""需求清单解析与可判定性预检（C-SPEC@1 / C-SPEC@2 / C-SPEC@3）。
 
 把 Markdown 列表形式的需求清单转成 ``SpecItem``，并给出"能否验收"的判定
 与补齐建议；可判定条目再转换成 ``Claim(authority="external")``。
@@ -42,6 +42,30 @@ UNMEASURABLE: dict[str, str] = {
 
 _DEFAULT_SUGGESTION = "建议补充可测量的指标（数字 + 单位 + 判定阈值）"
 
+NEEDS_CRITERIA: dict[str, str] = {
+    "合规": "列出适用的法规或标准条款，并给出对应实现位置（file:line）",
+    "许可证": "声明项目许可证，并列出依赖许可证清单，确认无冲突",
+    "开源协议": "声明项目开源协议，并列出依赖协议清单，确认无冲突",
+    "gpl": "确认无 GPL/AGPL 依赖，或隔离为独立进程调用并给出边界",
+    "脱敏": "列出敏感字段清单与脱敏规则，并给出至少 1 处实现位置",
+    "明文": "列出禁止明文的字段，并给出加密或哈希实现位置",
+    "审计": "每个写操作产生审计记录：操作者、时间、对象、变更前后值",
+    "留痕": "关键路径留痕覆盖 100%，可回溯到 file:line",
+    "不可篡改": "审计记录仅追加，并给出完整性校验方式",
+    "热更新": "配置变更无需重启即生效，给出加载位置与生效验证方式",
+    "优雅停机": "停机时在途请求在阈值内处理完，给出信号处理位置",
+    "灰度": "支持按比例放量，给出开关位置与回滚方式",
+    "容灾": "定义 RTO/RPO 数值，并给出切换实现位置",
+    "向后兼容": "旧接口契约不变，给出契约测试或版本号证据",
+    "租户隔离": "租户数据在查询层强制过滤，给出隔离字段与过滤位置",
+    "数据隔离": "租户数据在查询层强制过滤，给出隔离字段与过滤位置",
+    "物理隔离": "定义隔离边界（库/表/实例），并给出证据位置",
+    "可观测": "关键路径 metric/log/trace 三类覆盖，给出埋点位置",
+    "链路追踪": "请求入口生成 trace_id 并全程透传，给出注入位置",
+    "国际化": "文案外置到资源文件，给出资源位置与切换入口",
+    "无障碍": "对照 WCAG 2.1 AA 逐项核对，并给出可访问性测试",
+}
+
 CONCURRENCY_CRITERIA = "错误率 < 1% 且 P95 < 1s（行业惯例，需提出人确认）"
 
 _THRESHOLD_RE = re.compile(
@@ -83,10 +107,27 @@ def parse_spec(text: str) -> list[SpecItem]:
     return items
 
 
+def _needs_criteria(text: str) -> str:
+    """返回位置最靠前的领域词表命中 key，无命中返回空串。"""
+    lowered = text.lower()
+    earliest_key = ""
+    earliest_pos = -1
+    for key in NEEDS_CRITERIA:
+        pos = lowered.find(key)
+        if pos < 0:
+            continue
+        if earliest_pos < 0 or pos < earliest_pos:
+            earliest_key = key
+            earliest_pos = pos
+    return earliest_key
+
+
 def is_decidable(text: str) -> bool:
     if _MEASURABLE_RE.search(text):
         return True
-    return not any(key in text for key in UNMEASURABLE)
+    if any(key in text for key in UNMEASURABLE):
+        return False
+    return not _needs_criteria(text)
 
 
 def default_criteria(text: str) -> str:
@@ -107,6 +148,9 @@ def suggestion_for(text: str) -> str:
         if earliest_pos < 0 or pos < earliest_pos:
             earliest_key = key
             earliest_pos = pos
+    criteria_key = _needs_criteria(text)
+    if criteria_key and (earliest_pos < 0 or text.lower().find(criteria_key) < earliest_pos):
+        return NEEDS_CRITERIA[criteria_key]
     return UNMEASURABLE[earliest_key] if earliest_key else _DEFAULT_SUGGESTION
 
 

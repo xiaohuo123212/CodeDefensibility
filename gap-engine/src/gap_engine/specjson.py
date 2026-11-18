@@ -1,4 +1,4 @@
-"""需求清单固化：把规则解析结果落盘为 ``gap-spec@1`` JSON（C-LLM@1/specjson@2）。
+"""需求清单固化：把规则解析结果落盘为 ``gap-spec@1`` JSON（C-LLM@1/specjson@4）。
 
 ``items`` 的 ``text`` / ``line`` / ``decidable`` 唯一来源是 ``spec.parse_spec``；
 ``provider`` 非空时，模型只被用来把**不可判定条目**改写成一条可验收判据写进
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -30,6 +31,14 @@ CRITERIA_PROMPT = (
     "把下面这条软件需求改写为一条可验收的量化判据。"
     "只输出判据本身，一行，不超过 40 个汉字，不要解释，不要给文件路径或行号。\n"
     "需求原文：{text}"
+)
+
+# 判据必须含可量化阈值或 ``file:`` 定位才算可验收；不复用 spec._MEASURABLE_RE，
+# 那条正则面向判定域、放过大量无阈值文本（如「支持配置热更新功能」）。
+_CRITERIA_CHECK_RE = re.compile(
+    r"\d+(?:\.\d+)?\s*(?:%|ms|毫秒|秒|s\b|分钟|小时|天|次|个|条|类|项|并发|用户|qps|tps|rps|倍|层)"
+    r"|P9\d|P5\d|file:\S+",
+    re.IGNORECASE,
 )
 
 
@@ -121,9 +130,10 @@ def _criteria_for(
     index: int = 0,
     total: int = 0,
 ) -> str:
-    """取模型返回值 strip 后的第一个非空行；空串交由调用方保留规则值。
+    """取第一个非空且命中 ``_CRITERIA_CHECK_RE`` 的行；没有则返回空串。
 
-    ``llm_fn`` 自身吞异常，故 ``start`` / ``done`` 必然成对发出。
+    空串交由调用方保留规则兜底判据。``llm_fn`` 自身吞异常，故 ``start`` / ``done``
+    必然成对发出。
     """
     _emit(progress, PHASE_START, index, total, text, 0.0)
     started = time.perf_counter()
@@ -131,7 +141,7 @@ def _criteria_for(
     _emit(progress, PHASE_DONE, index, total, text, time.perf_counter() - started)
     for line in answer.splitlines():
         candidate = line.strip()
-        if candidate:
+        if candidate and _CRITERIA_CHECK_RE.search(candidate):
             return candidate[:CRITERIA_MAX_CHARS]
     return ""
 
