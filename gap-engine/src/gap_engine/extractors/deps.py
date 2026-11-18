@@ -26,8 +26,9 @@ def _requirement_name(raw: str) -> str | None:
 
 
 def _requirements_names(text: str) -> list[str]:
+    # 行尾反斜杠续行在 pip 语义里属于同一条声明，先拼成单行再逐行解析。
     names: list[str] = []
-    for raw in text.splitlines():
+    for raw in re.sub(r"\\\r?\n", " ", text).splitlines():
         name = _requirement_name(raw)
         if name:
             names.append(name)

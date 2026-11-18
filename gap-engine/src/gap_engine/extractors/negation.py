@@ -53,10 +53,34 @@ SUFFIXES = frozenset(
 CAP = 40
 SUPPORTS = [ClaimType.performance, ClaimType.concurrency, ClaimType.feature, ClaimType.testing]
 
+# 参数校验型异常：其消息里的否定词描述的是入参不合法，不是功能未实现。
+_EXCEPTION_GUARD = (
+    "valueerror(",
+    "typeerror(",
+    "keyerror(",
+    "attributeerror(",
+    "assertionerror(",
+    "indexerror(",
+    "oserror(",
+    "lookuperror(",
+    "overflowerror(",
+)
+
+
+def _inside_string_literal(text: str, index: int) -> bool:
+    prefix = text[:index]
+    return prefix.count('"') % 2 == 1 or prefix.count("'") % 2 == 1
+
 
 def _is_negation_line(text: str) -> bool:
     lowered = text.lower()
-    if any(marker in lowered for marker in NEGATION_MARKERS):
+    guarded = any(token in lowered for token in _EXCEPTION_GUARD)
+    for marker in NEGATION_MARKERS:
+        index = lowered.find(marker)
+        if index < 0:
+            continue
+        if guarded and _inside_string_literal(lowered, index):
+            continue
         return True
     return any(token in lowered for token in TODO_MARKERS) and any(
         word in lowered for word in TODO_CONTEXT

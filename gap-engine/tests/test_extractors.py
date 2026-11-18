@@ -1,4 +1,4 @@
-"""C-EXTRACTOR@1/@2/@3/@4/@5 回归测试：注册、证据下限、行号、路由证据、产物证据、否定证据、空仓行为。"""
+"""C-EXTRACTOR@1/@2/@3/@4/@5/@6 回归测试：注册、证据下限、行号、路由证据、产物证据、否定证据、符号行、空仓行为。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ EXTRACTOR_NAMES = (
     "config",
     "artifact",
     "negation",
+    "symbols",
 )
 NON_STATISTICAL = (
     "deps",
@@ -34,6 +35,7 @@ NON_STATISTICAL = (
     "config",
     "artifact",
     "negation",
+    "symbols",
 )
 FIXTURE_NAMES = ("fx-concurrency", "fx-feature", "fx-testing")
 
@@ -110,6 +112,20 @@ def test_deps_line_points_at_the_declaration_not_the_file_head() -> None:
 
 def test_deps_is_empty_without_dependency_manifests() -> None:
     assert _extract("deps", "fx-testing") == []
+
+
+def test_deps_joins_backslash_continuations(tmp_path: Path) -> None:
+    (tmp_path / "requirements.txt").write_text(
+        "openpyxl>=3.0 \\\n"
+        "    --hash=sha256:abc\n"
+        "gunicorn\n",
+        encoding="utf-8",
+    )
+
+    items = EXTRACTORS["deps"](build_index(tmp_path))
+
+    assert [item.snippet for item in items] == ["openpyxl>=3.0 \\", "gunicorn"]
+    assert [item.line for item in items] == [1, 3]
 
 
 def test_entry_finds_main_guarded_startup() -> None:
@@ -377,6 +393,86 @@ def test_negation_keeps_evidence_when_line_of_returns_none(
 @pytest.mark.parametrize("fixture", FIXTURE_NAMES)
 def test_negation_is_absent_in_fixtures(fixture: str) -> None:
     assert _extract("negation", fixture) == []
+
+
+def test_negation_skips_negation_words_inside_validation_error_messages(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "app.py").write_text(
+        "def load(fmt):\n"
+        '    raise ValueError(f"Unsupported format: {fmt}")\n'
+        "    raise KeyError('unsupported key')\n"
+        "\n"
+        "def other():\n"
+        '    raise NotImplementedError("not supported yet")\n',
+        encoding="utf-8",
+    )
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert [(item.file, item.line) for item in items] == [("app.py", 6)]
+    assert items[0].snippet == 'raise NotImplementedError("not supported yet")'
+
+
+def test_negation_keeps_marker_outside_the_exception_message(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        'raise ValueError("bad input")  # 暂不支持批量导出\n', encoding="utf-8"
+    )
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert len(items) == 1
+    assert items[0].line == 1
+
+
+
+def test_symbols_emits_one_first_symbol_line_per_file(tmp_path: Path) -> None:
+    (tmp_path / "mod.py").write_text("import os\n\n\ndef export():\n    pass\n", encoding="utf-8")
+    (tmp_path / "notes.md").write_text("def looks_like_code():\n", encoding="utf-8")
+    (tmp_path / "plain.py").write_text("import os\n", encoding="utf-8")
+
+    items = EXTRACTORS["symbols"](build_index(tmp_path))
+
+    assert [(item.file, item.line) for item in items] == [("mod.py", 4)]
+    first = items[0]
+    assert first.id == "ev-symbols-001"
+    assert first.snippet == "def export():"
+    assert first.kind is EvidenceKind.code
+    assert first.strength is Strength.low
+    assert first.supports == [ClaimType.feature]
+
+
+def test_symbols_covers_mainstream_languages(tmp_path: Path) -> None:
+    cases = {
+        "a.py": "class A:",
+        "b.js": "export const b = 1;",
+        "c.ts": "function c() {}",
+        "d.java": "public class D {}",
+        "e.go": "func e() {}",
+        "f.rs": "fn f() {}",
+        "g.cpp": "namespace g {",
+        "h.rb": "module H",
+        "i.cs": "public enum I {}",
+        "j.kt": "interface J",
+        "k.scala": "class K",
+    }
+    for name, line in cases.items():
+        (tmp_path / name).write_text(f"// header\n{line}\n", encoding="utf-8")
+
+    items = EXTRACTORS["symbols"](build_index(tmp_path))
+
+    assert {item.file: item.snippet for item in items} == cases
+    assert all(item.line == 2 for item in items)
+
+
+def test_symbols_keeps_at_most_one_evidence_per_file(tmp_path: Path) -> None:
+    body = "\n".join(f"def f{i}(): pass" for i in range(50))
+    (tmp_path / "many.py").write_text(body + "\n", encoding="utf-8")
+
+    items = EXTRACTORS["symbols"](build_index(tmp_path))
+
+    assert len(items) == 1
+    assert items[0].line == 1
 
 
 @pytest.mark.parametrize("fixture", FIXTURE_NAMES)

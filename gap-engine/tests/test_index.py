@@ -1,4 +1,4 @@
-"""C-INDEX@1 回归测试：文件收集、相对路径、懒加载文本、行号来源。"""
+"""C-INDEX@2 回归测试：文件收集、相对路径、懒加载文本、行号来源、扩表与截断标记。"""
 
 from __future__ import annotations
 
@@ -74,12 +74,44 @@ def test_skips_noise_dirs_binaries_and_oversized_files(tmp_path: Path) -> None:
     assert [index.rel(p) for p in index.files] == ["app.py"]
 
 
+def test_skips_archived_snapshot_directories(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("print(1)\n", encoding="utf-8")
+    for skipped in ("_archive", "_archived", "archive", "_old", "old", "deprecated"):
+        target = tmp_path / "pkg" / skipped
+        target.mkdir(parents=True)
+        (target / "stale.py").write_text("stale = True\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == ["main.py"]
+
+
 def test_max_files_bounds_the_index(tmp_path: Path) -> None:
     for i in range(5):
         (tmp_path / f"m{i}.py").write_text(f"v = {i}\n", encoding="utf-8")
 
     assert len(build_index(tmp_path, max_files=2).files) == 2
     assert build_index(tmp_path, max_files=0).files == ()
+
+
+def test_truncated_is_false_when_every_file_fits(tmp_path: Path) -> None:
+    for i in range(3):
+        (tmp_path / f"m{i}.py").write_text(f"v = {i}\n", encoding="utf-8")
+
+    index = build_index(tmp_path, max_files=3)
+
+    assert len(index.files) == 3
+    assert index.truncated is False
+
+
+def test_truncated_is_true_when_max_files_stops_the_walk(tmp_path: Path) -> None:
+    for i in range(5):
+        (tmp_path / f"m{i}.py").write_text(f"v = {i}\n", encoding="utf-8")
+
+    index = build_index(tmp_path, max_files=2)
+
+    assert [index.rel(p) for p in index.files] == ["m0.py", "m1.py"]
+    assert index.truncated is True
 
 
 def test_missing_root_raises_file_not_found(tmp_path: Path) -> None:
@@ -121,3 +153,95 @@ def test_htmlcov_directory_is_still_skipped(tmp_path: Path) -> None:
     index = build_index(tmp_path)
 
     assert [index.rel(p) for p in index.files] == ["coverage.xml"]
+
+def test_indexes_c_and_cpp_sources(tmp_path: Path) -> None:
+    for name in ("main.c", "app.h", "impl.cc", "impl.cpp", "impl.cxx", "api.hpp", "api.hh", "api.hxx"):
+        (tmp_path / name).write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == [
+        "api.hh",
+        "api.hpp",
+        "api.hxx",
+        "app.h",
+        "impl.cc",
+        "impl.cpp",
+        "impl.cxx",
+        "main.c",
+    ]
+    assert len(index.by_suffix(".h", ".hpp")) == 2
+
+def test_skips_generated_build_dirs_by_prefix(tmp_path: Path) -> None:
+    for name in ("build-cmake", "cmake-build-debug", "CMakeFiles"):
+        target = tmp_path / name
+        target.mkdir()
+        (target / "cache.txt").write_text("generated\n", encoding="utf-8")
+    (tmp_path / "main.cpp").write_text("int main() { return 0; }\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == ["main.cpp"]
+
+
+def test_skips_legacy_build_dir_case_insensitively(tmp_path: Path) -> None:
+    (tmp_path / "Build").mkdir()
+    (tmp_path / "Build" / "out.txt").write_text("generated\n", encoding="utf-8")
+    (tmp_path / "keep.py").write_text("x = 1\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == ["keep.py"]
+
+
+def test_ignore_file_excludes_paths_and_globs(tmp_path: Path) -> None:
+    (tmp_path / ".ignore").write_text(
+        "# 归档与生成物\n"
+        "\n"
+        "editors/vscode/python/archive_specs.py\n"
+        "docs/generated/\n"
+        "*.min.js\n",
+        encoding="utf-8",
+    )
+    nested = tmp_path / "editors" / "vscode" / "python"
+    nested.mkdir(parents=True)
+    (nested / "archive_specs.py").write_text("x = 1\n", encoding="utf-8")
+    (nested / "runtime.py").write_text("y = 2\n", encoding="utf-8")
+    generated = tmp_path / "docs" / "generated"
+    generated.mkdir(parents=True)
+    (generated / "spec.md").write_text("generated\n", encoding="utf-8")
+    (tmp_path / "app.min.js").write_text("var a = 1;\n", encoding="utf-8")
+    (tmp_path / "app.js").write_text("var a = 1;\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == ["app.js", "editors/vscode/python/runtime.py"]
+
+
+def test_ignore_file_absent_or_comment_only_changes_nothing(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    baseline = [build_index(tmp_path).rel(p) for p in build_index(tmp_path).files]
+
+    (tmp_path / ".ignore").write_text("# 只有注释\n\n", encoding="utf-8")
+    after = [build_index(tmp_path).rel(p) for p in build_index(tmp_path).files]
+
+    assert after == baseline == ["app.py"]
+
+
+def test_ignore_file_itself_is_not_indexed(tmp_path: Path) -> None:
+    (tmp_path / ".ignore").write_text("keep.py\n", encoding="utf-8")
+    (tmp_path / "keep.py").write_text("x = 1\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert ".ignore" not in [index.rel(p) for p in index.files]
+
+def test_skips_oss_scanner_output_dir(tmp_path: Path) -> None:
+    scanner = tmp_path / ".oss-scanner"
+    scanner.mkdir()
+    (scanner / "report.md").write_text("scanner output\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    index = build_index(tmp_path)
+
+    assert [index.rel(p) for p in index.files] == ["app.py"]
