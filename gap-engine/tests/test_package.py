@@ -40,6 +40,7 @@ def _make_root(tmp_path: Path) -> Path:
     _touch(root / "gap-engine" / ".mypy_cache" / "3.11" / "cache.json")
     _touch(root / "gap-engine" / "gap_engine.egg-info" / "PKG-INFO")
     _touch(root / "gap-engine" / "node_modules" / "pkg" / "index.js")
+    _touch(root / "gap-engine" / ".tmp" / "regen" / "report.md")
     return root
 
 
@@ -76,6 +77,7 @@ def test_dirty_files_are_excluded(tmp_path: Path) -> None:
     assert not [name for name in names if name.startswith("project/build/")]
     assert not [name for name in names if name.startswith("project/dist/")]
     assert not [name for name in names if name.startswith("project/node_modules/")]
+    assert not [name for name in names if name.startswith("project/.tmp/")]
     assert not [name for name in names if Path(name).name == ".env"]
 
 

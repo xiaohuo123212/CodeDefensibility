@@ -21,7 +21,7 @@ TOP_DIRS: tuple[tuple[str, str], ...] = (
 )
 
 EXCLUDED_SEGMENTS = frozenset(
-    {"__pycache__", ".git", "build", "dist", ".pytest_cache", ".mypy_cache", "node_modules"}
+    {"__pycache__", ".git", ".tmp", "build", "dist", ".pytest_cache", ".mypy_cache", "node_modules"}
 )
 EXCLUDED_NAMES = frozenset({".env"})
 EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
