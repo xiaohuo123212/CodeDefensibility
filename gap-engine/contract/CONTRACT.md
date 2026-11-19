@@ -1,4 +1,4 @@
-# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@4） / C-SPEC@2/@3）
+# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@6） / C-SPEC@2/@3）
 
 > 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十二句。
 
@@ -33,7 +33,7 @@
 | C-EXTRACTOR@7 | `src/gap_engine/extractors/negation.py` + `deps.py` | `_EXCEPTION_GUARD` / `_inside_string_literal`（参数校验型异常消息内的否定词不算反证）；`_requirements_names` 先拼接行尾 `\` 续行 |
 | C-RENDERER@7/@8/@9 | `src/gap_engine/renderer.py` | `render` 的 `结论：` 三态文案、`换假设：{rounds} 轮` 行、局限段措辞；@8：`_scope_note` 与「不判定」块；@9：`_dedup_note` 去重口径行 |
 | C-DEMO@2 | `demo/source.py`（新增）+ `demo/app.py` | `extract_zip` / `clone_github` + 四个上限常量；三种输入方式与 UI 约束 |
-| C-LLM@1 | `src/gap_engine/llm.py` + `advice.py` + `specjson.py` + `progress.py` + `cli.py` | `LlmProvider` / `HttpLlm` / `load_provider` / `as_llm_fn`；`advice_targets` / `render_advice`；`build_spec_document` / `write_spec_json` / `load_spec_json`；`LABEL_CRITERIA` / `LABEL_ADVICE` / `TEXT_MAX_CHARS` / `ProgressEvent` / `ProgressFn` / `stderr_progress` / `resolve_progress`；`gap parse-spec` / `gap advise` 的 `--progress` / `--no-progress`；specjson@4：`_CRITERIA_CHECK_RE` 与 `_criteria_for` 只采纳含量化阈值或 `file:` 定位的模型返回值 |
+| C-LLM@1 | `src/gap_engine/llm.py` + `advice.py` + `specjson.py` + `progress.py` + `cli.py` | `LlmProvider` / `HttpLlm` / `load_provider` / `as_llm_fn`；`advice_targets` / `render_advice`；`build_spec_document` / `write_spec_json` / `load_spec_json`；`LABEL_CRITERIA` / `LABEL_ADVICE` / `TEXT_MAX_CHARS` / `ProgressEvent` / `ProgressFn` / `stderr_progress` / `resolve_progress`；`gap parse-spec` / `gap advise` 的 `--progress` / `--no-progress`；specjson@4：`_CRITERIA_CHECK_RE` 与 `_criteria_for` 只采纳含量化阈值或 `file:` 定位的模型返回值；specjson@5：`_strip_restatement` / `_RESTATE_GENERIC`——以需求原文开头的候选先剥离复述前缀（比对时剔除空白与中英文标点），只保留澄清残量；specjson@6：`_overlap_ratio` / `_core_topics` / `_RESTATE_OVERLAP` / `_TOPIC_CORE_MIN`——残量须过三道检查：含量化阈值或 `file:` 定位；与需求核心二字词覆盖率 `< 0.5`（否则判为换语序/加主语的复述）；需求核心词 ≥ 3 时覆盖率不得为 0（否则判为离题）。`CRITERIA_PROMPT` 增加「判据必须针对需求提到的对象，不要替换成需求没提到的指标」约束 |
 
 ## 索引扩表与截断（C-INDEX@2/@3）
 

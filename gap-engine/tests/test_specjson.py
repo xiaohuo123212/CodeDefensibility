@@ -1,4 +1,4 @@
-"""C-LLM@1/specjson@2/@4：gap-spec@1 文档构造、不可判定条目判据生成、落盘与回读。"""
+"""C-LLM@1/specjson@2/@4/@5：gap-spec@1 文档构造、不可判定条目判据生成、落盘与回读。"""
 
 from __future__ import annotations
 
@@ -157,7 +157,7 @@ def test_criteria_truncated_to_max_chars() -> None:
     assert len(suggestion) == CRITERIA_MAX_CHARS
 
 
-# ---------- C-LLM@1/specjson@4 判据校验 ----------
+# ---------- C-LLM@1/specjson@4/@5 判据校验 ----------
 
 
 def test_criteria_check_re_matches_threshold_and_file_locator_forms() -> None:
@@ -197,6 +197,63 @@ def test_criteria_accepts_file_locator_answer() -> None:
     provider = FakeProvider(answer="审计开关见 file:config/audit.yaml")
     document = build_spec_document("- 高性能\n", "requirements.md", provider)
     assert document["items"][0]["suggestion"] == "审计开关见 file:config/audit.yaml"  # type: ignore[index]
+
+
+def test_criteria_drops_threshold_appended_to_restated_requirement() -> None:
+    """真模型实测缺陷：把需求原样复述，再在末尾附会一个无关阈值。"""
+    spec = "- 系统支持配置热更新功能\n"
+    rule_items = build_spec_document(spec, "requirements.md", None)["items"]
+    for answer in (
+        "系统支持配置热更新功能，更新频率不低于1次/天。",
+        "系统支持配置热更新功能，更新频率不低于1次/天",
+        "系统支持配置热更新功能更新频率不低于1次/天。",
+        "系统支持配置热更新功能。",
+    ):
+        document = build_spec_document(spec, "requirements.md", FakeProvider(answer))
+        assert document["items"] == rule_items, answer
+
+
+def test_criteria_strips_restated_prefix_and_keeps_the_clarification() -> None:
+    """「原文 + 真澄清」是合格改写：只丢复述那半句，不把有用的残量一起丢掉。"""
+    spec = "- 系统支持配置热更新功能\n"
+    provider = FakeProvider("系统支持配置热更新功能，配置变更后5秒内生效，无需重启")
+    document = build_spec_document(spec, "requirements.md", provider)
+    assert document["items"][0]["suggestion"] == "配置变更后5秒内生效，无需重启"  # type: ignore[index]
+
+
+def test_criteria_rejects_reordered_restatement_with_threshold() -> None:
+    """换语序、加主语后的复述仍与原文高度重合，附一个阈值也不能放行。"""
+    spec = "- 配置支持热更新\n"
+    rule_items = build_spec_document(spec, "requirements.md", None)["items"]
+    for answer in (
+        "系统支持配置热更新功能，5秒内生效",
+        "系统支持配置热更新功能",
+    ):
+        document = build_spec_document(spec, "requirements.md", FakeProvider(answer))
+        assert document["items"] == rule_items, answer
+
+
+def test_criteria_rejects_judgement_off_the_requirement_topic() -> None:
+    """有阈值却没命中需求任何一个核心词，就是另起炉灶，回落规则兜底。"""
+    spec = "- 支持灰度发布\n"
+    rule_items = build_spec_document(spec, "requirements.md", None)["items"]
+    document = build_spec_document(spec, "requirements.md", FakeProvider("系统支持5%流量分发测试"))
+    assert document["items"] == rule_items
+
+
+def test_criteria_accepts_short_requirement_with_stacked_generic_prefix() -> None:
+    """「系统应具备高性能」剥掉多层骨架词后只剩短核心，不该被判离题。"""
+    spec = "- 系统应具备高性能\n"
+    provider = FakeProvider("响应时间小于100毫秒")
+    document = build_spec_document(spec, "requirements.md", provider)
+    assert document["items"][0]["suggestion"] == "响应时间小于100毫秒"  # type: ignore[index]
+
+
+def test_criteria_accepts_rewrite_that_drops_the_original_wording() -> None:
+    spec = "- 系统支持配置热更新功能\n"
+    provider = FakeProvider("配置变更无需重启即生效，生效时间小于1秒")
+    document = build_spec_document(spec, "requirements.md", provider)
+    assert document["items"][0]["suggestion"] == "配置变更无需重启即生效，生效时间小于1秒"  # type: ignore[index]
 
 
 def test_blank_answer_keeps_rule_suggestion() -> None:
