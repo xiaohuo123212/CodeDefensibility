@@ -1,11 +1,12 @@
 """从 final.pptx 母版生成比赛定稿 pptx。
 
 每次运行都从 SRC 重新复制覆盖 DST，再做四处定点修正：
-章节序号、右下角页码、四栏卡对比度、指标页标签，因此重复执行结果一致。
+全局去色、章节序号、右下角页码、指标页标签，因此重复执行结果一致。
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -26,20 +27,39 @@ METRICS_SLIDE_INDEX = 12  # 第 13 页：指标页
 CHAPTER_OLD, CHAPTER_NEW = "004", "04"
 
 PAGE_NUMBER_BOX = (Inches(11.40), Inches(7.02), Inches(1.36), Inches(0.24))
-PAGE_NUMBER_COLOR = "C7D1DA"
+PAGE_NUMBER_COLOR = "8C8C8C"
 
-CARD_COL3_FILL = "0A7F8B"
-CARD_COL4_FILL = "12293E"
-COL3_TEXT_COLOR = "F4F7FA"
-COL4_HEAD_COLOR = "6AD7E5"
-COL4_BODY_COLOR = "C7D1DA"
-HEAD_MIN_FONT_PT = 16.0
+# 背景与文字只留黑白灰：大面积色块按原明度压成同一套深灰阶，
+# 强调色只保留 ACCENT，且只落在序号、指标数字与每页小标签上。
+ACCENT = "21B8C7"
+NEUTRAL_FILL_MAP = {
+    "6AD7E5": "3A3A3A",
+    "21B8C7": "333333",
+    "0A7F8B": "2C2C2C",
+    "12293E": "222222",
+    "0E1F2F": "181818",
+}
+CARD_FILLS = ("6AD7E5", "0A7F8B", "12293E")
+
+NEUTRAL_TEXT_LIGHT = "F2F2F2"  # 大标题
+NEUTRAL_TEXT_BODY = "D9D9D9"  # 正文
+NEUTRAL_TEXT_DARK = "1A1A1A"  # 浅色底上的字
+TITLE_MIN_FONT_PT = 29.0
+INDEX_MIN_FONT_PT = 16.0
+
+# 每页一枚小标签，是全篇唯一允许保留的强调文字之一
+ACCENT_EYEBROWS = frozenset(
+    {
+        "THE GAP", "CONTRACT SPLIT", "PIPELINE", "VERDICT", "HIGHLIGHTS",
+        "ENGINEERING", "METRICS", "LIMITS", "LESSONS", "ROADMAP",
+    }
+)
 
 METRIC_LABELS = {"N=?": "认可率", "25": "样本条目", "5": "项目数"}
 METRIC_NUM_PT = 40.0
-METRIC_ACCENT = "21B8C7"
+METRIC_ACCENT = ACCENT
 METRIC_LABEL_PT = 8.88
-METRIC_LABEL_COLOR = "C7D1DA"
+METRIC_LABEL_COLOR = "D9D9D9"
 METRIC_LABEL_WIDTH = Inches(1.2)
 METRIC_LABEL_HEIGHT = Inches(0.16)
 
@@ -77,14 +97,6 @@ def _shape_max_font_pt(shape) -> float:
     return max(sizes) if sizes else 0.0
 
 
-def _contains(outer, inner) -> bool:
-    return (
-        inner.left >= outer.left
-        and inner.top >= outer.top
-        and inner.left + inner.width <= outer.left + outer.width
-        and inner.top + inner.height <= outer.top + outer.height
-    )
-
 
 def fix_chapter_number(prs) -> None:
     slide = prs.slides[CHAPTER_SLIDE_INDEX]
@@ -117,34 +129,94 @@ def add_page_numbers(prs) -> None:
         run.font.color.rgb = RGBColor.from_string(PAGE_NUMBER_COLOR)
 
 
-def fix_card_contrast(prs) -> None:
-    for slide_index in CARD_SLIDE_INDEXES:
-        slide = prs.slides[slide_index]
-        cards = {}
-        for shape in slide.shapes:
-            fill = _solid_fill_rgb(shape)
-            if fill in (CARD_COL3_FILL, CARD_COL4_FILL):
-                cards[fill] = shape
+def _iter_shapes(shapes):
+    for shape in shapes:
+        yield shape
+        if getattr(shape, "shapes", None) is not None:
+            yield from _iter_shapes(shape.shapes)
 
-        for fill in (CARD_COL3_FILL, CARD_COL4_FILL):
-            if fill not in cards:
-                raise RuntimeError(f"第 {slide_index + 1} 页未找到底色 {fill} 的栏位")
 
-        for shape in slide.shapes:
-            if not shape.has_text_frame or not shape.text_frame.text.strip():
-                continue
-            for fill, card in cards.items():
-                if not _contains(card, shape):
+def _relative_luminance(hex_rgb: str) -> float:
+    channels = [int(hex_rgb[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _backdrop_rgb(shapes, target):
+    """取中心点落在其内、面积最小的纯色形状的填充色，作为文字所在底色。"""
+    cx = target.left + target.width // 2
+    cy = target.top + target.height // 2
+    best = None
+    for shape in shapes:
+        if shape is target:
+            continue
+        rgb = _solid_fill_rgb(shape)
+        if rgb is None:
+            continue
+        inside = (
+            shape.left <= cx <= shape.left + shape.width
+            and shape.top <= cy <= shape.top + shape.height
+        )
+        if not inside:
+            continue
+        area = shape.width * shape.height
+        if best is None or area < best[0]:
+            best = (area, rgb)
+    return best[1] if best else None
+
+
+_INDEX_RE = re.compile(r"\d{1,3}")
+_YEAR_RE = re.compile(r"20\d{2}")
+
+
+def _is_accent(text: str, size_pt: float) -> bool:
+    """序号、指标大数字、每页一枚小标签保留强调色，其余一律压成灰阶。"""
+    if text == "N=?" or text in ACCENT_EYEBROWS or _YEAR_RE.fullmatch(text):
+        return True
+    return bool(_INDEX_RE.fullmatch(text)) and size_pt >= INDEX_MIN_FONT_PT
+
+
+def neutralize_colors(prs) -> None:
+    """把大面积彩色块与彩字压成灰阶，只给少数小字留强调色。"""
+    for slide in prs.slides:
+        for shape in _iter_shapes(slide.shapes):
+            rgb = _solid_fill_rgb(shape)
+            if rgb in NEUTRAL_FILL_MAP:
+                shape.fill.fore_color.rgb = RGBColor.from_string(NEUTRAL_FILL_MAP[rgb])
+
+    # 四栏卡是重点展示图，底色缺失说明母版变了，必须报错而不是静默跳过
+    for index in CARD_SLIDE_INDEXES:
+        found = {_solid_fill_rgb(shape) for shape in prs.slides[index].shapes}
+        missing = [fill for fill in CARD_FILLS if NEUTRAL_FILL_MAP[fill] not in found]
+        if missing:
+            raise RuntimeError(f"第 {index + 1} 页未找到四栏卡底色 {missing}")
+
+    for slide in prs.slides:
+        # 只用顶层形状求底色：组内坐标与幻灯片坐标不同系，混用会算错位置
+        shapes = list(slide.shapes)
+        for shape in shapes:
+            backdrop = _backdrop_rgb(shapes, shape)
+            on_light = backdrop is not None and _relative_luminance(backdrop) > 0.5
+            # 页眉标识等文字成组出现，组内子形状沿用整组的底色判断
+            for node in _iter_shapes([shape]):
+                if not getattr(node, "has_text_frame", False):
                     continue
-                if fill == CARD_COL3_FILL:
-                    color = COL3_TEXT_COLOR
-                elif _shape_max_font_pt(shape) >= HEAD_MIN_FONT_PT:
-                    color = COL4_HEAD_COLOR
-                else:
-                    color = COL4_BODY_COLOR
-                for run in _iter_runs(shape):
+                if not node.text_frame.text.strip():
+                    continue
+                for run in _iter_runs(node):
+                    text = run.text.strip()
+                    if not text:
+                        continue
+                    size = run.font.size.pt if run.font.size else 0.0
+                    if _is_accent(text, size):
+                        color = ACCENT
+                    elif on_light:
+                        color = NEUTRAL_TEXT_DARK
+                    elif size >= TITLE_MIN_FONT_PT:
+                        color = NEUTRAL_TEXT_LIGHT
+                    else:
+                        color = NEUTRAL_TEXT_BODY
                     run.font.color.rgb = RGBColor.from_string(color)
-                break
 
 
 def _text_width_in(text: str, size_pt: float):
@@ -213,8 +285,8 @@ def main() -> int:
         raise RuntimeError(f"母版页数应为 {SLIDE_COUNT}，实际 {len(prs.slides)}")
 
     fix_chapter_number(prs)
+    neutralize_colors(prs)
     add_page_numbers(prs)
-    fix_card_contrast(prs)
     fix_metrics_labels(prs)
 
     _save(prs, dst)
