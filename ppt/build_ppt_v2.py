@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 SRC: str = r"C:\Users\haoll\Downloads\final.pptx"
@@ -62,6 +62,54 @@ METRIC_LABEL_PT = 8.88
 METRIC_LABEL_COLOR = "D9D9D9"
 METRIC_LABEL_WIDTH = Inches(1.2)
 METRIC_LABEL_HEIGHT = Inches(0.16)
+
+# 指标页左侧数字块（右边界 4.29in）与右侧说明列（左边界 7.17in）之间是唯一空白竖带。
+# 该竖带被三条全宽细线（T4.19 / T5.38 / T6.56）切成三条横带，所以拆成三个文本框分别落带，
+# 每个框底边都留在线之上，避免分隔线从文字中间穿过。
+MEASURED_LEFT = Inches(4.40)
+MEASURED_WIDTH = Inches(2.62)
+MEASURED_TITLE_PT = 12.0
+MEASURED_BODY_PT = 11.0
+MEASURED_FONT = "MiSans VF Light"
+
+# 每框：(top, height, ((字号, 底色, ((文本, 是否强调色), ...)), ...))
+# 每段是一组 (文本, 是否强调色)；数字用 ACCENT，其余用正文灰
+MEASURED_BOXES = (
+    (Inches(3.29), Inches(0.86), (
+        (MEASURED_TITLE_PT, NEUTRAL_TEXT_LIGHT, (("乙组·人工真值（不依赖回执）", False),)),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("真实现 N=32：precision ", False), ("8/8 = 100%", True),
+            ("　recall ", False), ("8/32 = 25%", True),
+        )),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("（可判 27 条 ", False), ("8/27 = 29.6%", True), ("）", False),
+        )),
+    )),
+    (Inches(4.23), Inches(1.12), (
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("真反证 N=30：召回 ", False), ("1/30 = 3.3%", True),
+            ("　唯一定位 ", False), ("1/1 = 100%", True),
+        )),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("反向错误 ", False), ("6/30 = 20%", True),
+            ("　漏报 ", False), ("23/30 = 76.7%", True),
+        )),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (("偏置：真值取自自述，反证仅「明写」", False),)),
+    )),
+    (Inches(5.42), Inches(1.10), (
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("版本对照：@8 反向 ", False), ("2/10 = 20%", True),
+        )),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("@9 修复前反向 ", False), ("18/30 = 60%", True),
+            ("；@10 修复后反向 ", False), ("6/30 = 20%", True),
+        )),
+        (MEASURED_BODY_PT, NEUTRAL_TEXT_BODY, (
+            ("召回 ", False), ("1/10 = 10%", True), ("、", False), ("1/30 = 3.3%", True),
+            ("；判据敏感，引用须带版本号", False),
+        )),
+    )),
+)
 
 # 无字体文件可测量时按字符 em 宽度近似，只用于把标签订在数字右侧
 _CHAR_WIDTH_EM = {
@@ -261,6 +309,32 @@ def fix_metrics_labels(prs) -> None:
         run.font.color.rgb = RGBColor.from_string(METRIC_LABEL_COLOR)
 
 
+def add_measured_metrics(prs) -> None:
+    """在指标页三条横带里分别加乙组（已实测）数字，与甲组 N=? 明确分开。"""
+    slide = prs.slides[METRICS_SLIDE_INDEX]
+    for top, height, paragraphs in MEASURED_BOXES:
+        box = slide.shapes.add_textbox(MEASURED_LEFT, top, MEASURED_WIDTH, height)
+        frame = box.text_frame
+        frame.word_wrap = True
+        frame.margin_left = 0
+        frame.margin_right = 0
+        frame.margin_top = 0
+        frame.margin_bottom = 0
+        frame.vertical_anchor = MSO_ANCHOR.TOP
+        for index, (size_pt, base_color, parts) in enumerate(paragraphs):
+            paragraph = frame.paragraphs[0] if index == 0 else frame.add_paragraph()
+            paragraph.alignment = PP_ALIGN.LEFT
+            paragraph.line_spacing = 1.0
+            paragraph.space_before = Pt(0 if index == 0 else 2)
+            paragraph.space_after = Pt(0)
+            for text, accent in parts:
+                run = paragraph.add_run()
+                run.text = text
+                run.font.size = Pt(size_pt)
+                run.font.name = MEASURED_FONT
+                run.font.color.rgb = RGBColor.from_string(ACCENT if accent else base_color)
+
+
 def _save(prs, dst: Path) -> None:
     try:
         prs.save(dst)
@@ -288,6 +362,7 @@ def main() -> int:
     neutralize_colors(prs)
     add_page_numbers(prs)
     fix_metrics_labels(prs)
+    add_measured_metrics(prs)
 
     _save(prs, dst)
     print(f"已生成 {dst}")

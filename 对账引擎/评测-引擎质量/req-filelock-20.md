@@ -1,0 +1,22 @@
+# filelock 文档声称（取自 docs/index.rst「Lock Types」与「Platform Support」）
+
+- [ ] 提供平台无关的文件锁
+- [ ] 提供进程间同步
+- [ ] FileLock 在可用时自动选择原生后端，否则回退到软标记
+- [ ] 支持可取消的 acquire
+- [ ] 支持自死锁检测
+- [ ] SoftFileLock 不需要原生锁 API
+- [ ] SoftFileLock 支持同主机 PID 检查
+- [ ] SoftFileLock 通过进程启动标识回收已消失的持有者
+- [ ] StrictSoftFileLock 从不猜测持有者已死
+- [ ] StrictSoftFileLock 按唯一名称移除声明
+- [ ] SoftFileLease 提供带心跳的过期声明
+- [ ] SoftFileLease 支持 on_compromise 回调
+- [ ] ReadWriteLock 支持并发读者与单一写者
+- [ ] ReadWriteLock 默认是单例
+- [ ] ReadWriteLock 支持按模式重入
+- [ ] SoftReadWriteLock 支持写者优先
+- [ ] SoftReadWriteLock 提供无时钟心跳过期
+- [ ] AsyncFileLock 支持 async/await
+- [ ] AsyncFileLock 支持自定义 executor 与事件循环
+- [ ] Windows 后端使用 LockFileEx 在字节范围上加锁
