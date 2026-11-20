@@ -26,6 +26,8 @@ EXCLUDED_SEGMENTS = frozenset(
 EXCLUDED_NAMES = frozenset({".env"})
 EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
 EGG_INFO_SUFFIX = ".egg-info"
+# 按 zip 内路径排除：Remotion 的渲染中间产物（设计 §2.3 第 8 项）
+EXCLUDED_RELATIVE_PATHS = frozenset({"video/remotion/out"})
 
 DEFAULT_NAME = "gap-engine-v1.0.zip"
 
@@ -35,14 +37,24 @@ def _excluded_part(part: str) -> bool:
 
 
 def _excluded_file(name: str) -> bool:
-    return name in EXCLUDED_NAMES or Path(name).suffix.lower() in EXCLUDED_SUFFIXES
+    # "~$xxx.pptx" 是 Office 打开文件时生成的锁文件，不得进包
+    return (
+        name in EXCLUDED_NAMES
+        or name.startswith("~$")
+        or Path(name).suffix.lower() in EXCLUDED_SUFFIXES
+    )
 
 
 def _collect(src: Path, prefix: str) -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = []
     for dirpath, dirnames, filenames in os.walk(src):
         base = Path(dirpath)
-        dirnames[:] = sorted(name for name in dirnames if not _excluded_part(name))
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not _excluded_part(name)
+            and f"{prefix}/{(base / name).relative_to(src).as_posix()}" not in EXCLUDED_RELATIVE_PATHS
+        )
         for name in sorted(filenames):
             if _excluded_part(name) or _excluded_file(name):
                 continue
