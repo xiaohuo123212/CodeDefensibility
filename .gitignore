@@ -15,5 +15,7 @@ venv/
 .DS_Store
 Thumbs.db
 .tmp/
+# 成片约 97MB，随分发包交付，不入库
+video/*.mp4
 # 本地会话导出留痕，不入库
 华为云码道CodeArts代码智能体 *.md
