@@ -425,6 +425,94 @@ def test_negation_keeps_marker_outside_the_exception_message(tmp_path: Path) -> 
     assert items[0].line == 1
 
 
+def test_negation_ignores_markers_inside_identifiers(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "reason = runtime._lifetime_unsupported_reason + _HARD_LINK_UNSUPPORTED_ERRNOS\n"
+        "unsupported = (isinstance(error, NotImplementedError))\n",
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_ignores_fallback_descriptions(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        '    warnings.warn("flock not supported on this filesystem, falling back to SoftFileLock")\n',
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_ignores_test_expectations(tmp_path: Path) -> None:
+    (tmp_path / "test_x.py").write_text(
+        '    with pytest.raises(ValueError, match="run_in_executor is not supported when thread_local"):\n',
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_ignores_pending_error_messages(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        '    msg = f"preserve_lock_file=True is not supported by {cls_name}"\n'
+        '    message = "run_in_executor is not supported when thread_local is True"\n',
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_keeps_real_negation_next_to_new_contexts(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "def export():\n"
+        "    # 暂不支持批量导出\n"
+        "    unsupported_option = True\n"
+        "\n"
+        "def other():\n"
+        '    msg = "bad input"\n'
+        "    # not implemented: batch export\n",
+        encoding="utf-8",
+    )
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert [(item.file, item.line) for item in items] == [("app.py", 2), ("app.py", 7)]
+
+
+def test_negation_ignores_boolean_inversion_in_control_flow(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        "if preserve and not supported:\n"
+        "    return not supported\n",
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_ignores_quoted_english_phrase_in_comment(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text(
+        '# cannot name "operation not supported" as the errno here\n',
+        encoding="utf-8",
+    )
+
+    assert EXTRACTORS["negation"](build_index(tmp_path)) == []
+
+
+def test_negation_keeps_negation_inside_comments_mentioning_control_flow(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "app.py").write_text(
+        "# if 需要就 return，暂不支持并发\n"
+        "x = 1  # if this fails the feature is not implemented\n",
+        encoding="utf-8",
+    )
+
+    items = EXTRACTORS["negation"](build_index(tmp_path))
+
+    assert [(item.file, item.line) for item in items] == [("app.py", 1), ("app.py", 2)]
+
+
 
 def test_symbols_emits_one_first_symbol_line_per_file(tmp_path: Path) -> None:
     (tmp_path / "mod.py").write_text("import os\n\n\ndef export():\n    pass\n", encoding="utf-8")

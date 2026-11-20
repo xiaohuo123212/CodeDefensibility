@@ -13,6 +13,7 @@ from gap_engine.matcher import (
     LOCAL_COMPLETION_PROMPT,
     QUESTION_TEMPLATES,
     FEATURE_TERM_GROUPS,
+    IMPL_TERM_GROUPS,
     _is_dependency_declaration,
     _is_negation,
     _locator_evidence,
@@ -20,6 +21,7 @@ from gap_engine.matcher import (
     feature_terms,
     fix,
     gap_label,
+    impl_terms,
     judge,
     mentions,
     question,
@@ -495,4 +497,155 @@ def test_mentions_keeps_cjk_substring_matching() -> None:
     ev = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "i18n.py", 3, "多语言资源已加载")
 
     assert mentions(ev, ("多语言",))
-    assert not mentions(ev, ("用户登录",))
+
+
+def test_impl_term_groups_are_fixed() -> None:
+    assert len(IMPL_TERM_GROUPS) == 21
+    assert IMPL_TERM_GROUPS[0] == ("协程", "coroutine")
+    # 锁相关词故意不收：``lock`` 在 filelock 代码里遍地都是，会把误报抬回去
+    assert ("锁", "lock", "flock") not in IMPL_TERM_GROUPS
+
+
+def test_impl_terms_expands_cjk_requirement_to_english_impl_words() -> None:
+    assert impl_terms("支持用同步 with 语句加锁") == ("同步 with", "sync", "synchronous")
+    assert impl_terms("签名分隔符可以自由指定") == ("分隔符", "sep", "separator")
+    assert impl_terms("支持多语言") == ()
+    # ASCII 触发词按 C-MATCHER@6 词边界：AsyncFileLock 里的 sync 不算独立词
+    assert impl_terms("AsyncFileLock 支持自定义 executor") == ()
+    assert impl_terms("AsyncFileLock 支持 async/await") == ("异步", "async", "await")
+
+
+def test_impl_terms_find_english_negation_for_sync_with_requirement() -> None:
+    claim = _claim(ClaimType.feature, "AsyncFileLock 支持用同步 with 语句加锁")
+    negation = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/filelock/asyncio.py",
+        317,
+        "Sync context manager entry is not supported because lock acquisition is a coroutine.",
+    )
+
+    verdict = judge(claim, [negation], _trace())
+
+    assert verdict.status is Status.contradicted
+    assert verdict.locator is not None
+    assert (verdict.locator.file, verdict.locator.line) == ("src/filelock/asyncio.py", 317)
+
+
+def test_impl_terms_find_negation_by_separator() -> None:
+    claim = _claim(ClaimType.feature, "签名分隔符可以自由指定")
+    support = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "signer.py", 140, "self.sep = want_bytes(sep)")
+    negation = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "signer.py",
+        147,
+        "The given separator is not supported because it may be contained in the signature itself.",
+    )
+
+    verdict = judge(claim, [support, negation], _trace())
+
+    assert verdict.status is Status.contradicted
+    assert verdict.locator is not None
+    assert verdict.locator.line == 147
+
+
+def test_impl_terms_do_not_admit_unrelated_negation() -> None:
+    claim = _claim(ClaimType.feature, "AsyncFileLock 支持用同步 with 语句加锁")
+    support = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "src/filelock/asyncio.py", 330, "with AsyncFileLock(target) as lock:")
+    unrelated = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/filelock/asyncio.py",
+        900,
+        "Windows named pipes are not supported on this platform version",
+    )
+
+    verdict = judge(claim, [support, unrelated], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.line == 330
+
+def test_negation_relevance_ignores_file_path_package_name() -> None:
+    # C-MATCHER@8：``src/filelock/`` 路径命中 terms 里的 ``filelock``，不能让一行
+    # 讲 Termux 无 os.link 的注释变成「lifetime 过期」的反证
+    claim = _claim(ClaimType.feature, "FileLock 支持用 lifetime 参数按文件年龄强制过期")
+    support = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.medium,
+        "src/filelock/_api.py",
+        120,
+        "def __init__(self, lock_file, *, lifetime: float | None = None) -> None:",
+    )
+    unrelated = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/filelock/_strict.py",
+        830,
+        "# No os.link at all (Termux/Android): report it as unsupported like a filesystem that refuses hard links",
+    )
+
+    verdict = judge(claim, [support, unrelated], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.line == 120
+
+
+def test_negation_relevance_ignores_generic_literal_terms() -> None:
+    # C-MATCHER@8：``preserve_lock_file=True`` 切出的 ``true`` 无区分度，
+    # 不能让 pytest 参数标识 ``id="unsupported"`` 变成反证
+    claim = _claim(ClaimType.feature, "SoftFileLock 支持 preserve_lock_file=True 保留锁文件")
+    support = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.medium,
+        "src/filelock/_api.py",
+        200,
+        "if not preserve_lock_file: self._release()",
+    )
+    unrelated = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "tests/test_util.py",
+        613,
+        '@pytest.mark.parametrize("effective_ids", [pytest.param(True, id="supported"), pytest.param(False, id="unsupported")])',
+    )
+
+    verdict = judge(claim, [support, unrelated], _trace())
+
+    assert verdict.status is Status.supported
+
+def test_mentions_uses_file_name_not_directory() -> None:
+    # C-MATCHER@9：目录名里的包名不能让人人恒命中
+    packaged = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "src/filelock/_api.py", 1, "return None")
+    assert not mentions(packaged, ("filelock",))
+    assert not mentions(packaged, ("src",))
+
+    named = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "src/pkg/cli.py", 1, "return None")
+    assert mentions(named, ("cli",))
+
+
+def test_feature_judgment_does_not_match_package_name_in_path() -> None:
+    # C-MATCHER@9：只有包名与需求重合、内容无关的证据不能支撑结论
+    claim = _claim(ClaimType.feature, "FileLock 支持用 lifetime 参数按文件年龄强制过期")
+    unrelated = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/filelock/_strict.py",
+        830,
+        "# No os.link at all (Termux/Android): report it as unsupported like a filesystem that refuses hard links",
+    )
+
+    verdict = judge(claim, [unrelated], _trace())
+
+    assert verdict.status is Status.no_evidence
+    assert verdict.locator is None

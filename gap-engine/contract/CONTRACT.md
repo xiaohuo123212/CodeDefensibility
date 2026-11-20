@@ -1,4 +1,4 @@
-# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@6） / C-SPEC@2/@3）
+# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6/@7/@8/@9 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7/@8 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@6） / C-SPEC@2/@3）
 
 > 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十二句。
 
@@ -25,12 +25,13 @@
 | C-TRACE@2 | `src/gap_engine/trace.py` | `TraceSummary` / `summarize` / `headline`；@2：`distinct_scanned`（按 `(probe, target)` 去重） |
 | C-INDEX@2/@3/@4 | `src/gap_engine/index.py` | `SKIP_DIRS` / `SKIP_DIR_PREFIXES` / `IGNORE_FILE` / `TEXT_SUFFIXES` / `RepoIndex`（含 `truncated`）/ `build_index`；@4：`SKIP_DIRS` 追加 `.oss-scanner` |
 | C-PROBER@5/@7/@8 | `src/gap_engine/prober.py` | `PLAN` / `ALTERNATE_PLANS` / `plan(claim, round=1)` / `run(claim, index, round=1)` / `CANDIDATE_FILES`；@7：「相关实现」改指 `symbols`、feature 收窄兜底 `claim_terms`；@8：收窄复用 `matcher.mentions` |
-| C-MATCHER@5/@6 | `src/gap_engine/matcher.py` | `judge`（feature 分支的相关性兜底）、`feature_terms` / `claim_terms`、`CONTRADICTED_QUESTION_TEMPLATE`（`contradicted` 判定）；@6：`mentions`（ASCII 词边界匹配） |
+| C-MATCHER@5/@6/@7/@8/@9 | `src/gap_engine/matcher.py` | `judge`（feature 分支的相关性兜底）、`feature_terms` / `claim_terms`、`CONTRADICTED_QUESTION_TEMPLATE`（`contradicted` 判定）；@6：`mentions`（ASCII 词边界匹配）；@7：`IMPL_TERM_GROUPS` / `impl_terms`（反证相关性的中英实现词扩展）；@8：`_mentions_snippet` / `_GENERIC_TERMS`（反证相关性只看声明本身）；@9：`_name_and_snippet`（`mentions` 的路径只取文件名） |
 | C-PIPELINE@5/@6/@7 | `src/gap_engine/pipeline.py` | `analyze_repo` / `analyze_spec` 的 `max_rounds` 与挑战循环（`_judge_one`：只有 `no_evidence` 进第 2 轮）；`_facts` 一句话的入口三分支；@6：`_route_hits` / `_route_files` 与 `_overview` 入口行；@7：`_scope_verdict` 判定域短路 |
 | C-EXTRACTOR@4 | `src/gap_engine/extractors/artifact.py` | `extract`（`kind="bench"`、`strength="medium"`、`CAP=40`） |
 | C-EXTRACTOR@5 | `src/gap_engine/extractors/negation.py` | `NEGATION_MARKERS` / `extract`（显式否定声明） |
 | C-EXTRACTOR@6 | `src/gap_engine/extractors/symbols.py` | `SYMBOL_TOKENS` / `extract`（每文件首个符号行，`kind=code`、`strength=low`） |
 | C-EXTRACTOR@7 | `src/gap_engine/extractors/negation.py` + `deps.py` | `_EXCEPTION_GUARD` / `_inside_string_literal`（参数校验型异常消息内的否定词不算反证）；`_requirements_names` 先拼接行尾 `\` 续行 |
+| C-EXTRACTOR@8 | `src/gap_engine/extractors/negation.py` | `_FALLBACK_WORDS` / `_TEST_GUARD` / `_MESSAGE_ASSIGN_RE` / `_is_identifier_marker`（标识符、回退说明、测试期望、待抛消息内的否定词不算反证） |
 | C-RENDERER@7/@8/@9 | `src/gap_engine/renderer.py` | `render` 的 `结论：` 三态文案、`换假设：{rounds} 轮` 行、局限段措辞；@8：`_scope_note` 与「不判定」块；@9：`_dedup_note` 去重口径行 |
 | C-DEMO@2 | `demo/source.py`（新增）+ `demo/app.py` | `extract_zip` / `clone_github` + 四个上限常量；三种输入方式与 UI 约束 |
 | C-LLM@1 | `src/gap_engine/llm.py` + `advice.py` + `specjson.py` + `progress.py` + `cli.py` | `LlmProvider` / `HttpLlm` / `load_provider` / `as_llm_fn`；`advice_targets` / `render_advice`；`build_spec_document` / `write_spec_json` / `load_spec_json`；`LABEL_CRITERIA` / `LABEL_ADVICE` / `TEXT_MAX_CHARS` / `ProgressEvent` / `ProgressFn` / `stderr_progress` / `resolve_progress`；`gap parse-spec` / `gap advise` 的 `--progress` / `--no-progress`；specjson@4：`_CRITERIA_CHECK_RE` 与 `_criteria_for` 只采纳含量化阈值或 `file:` 定位的模型返回值；specjson@5：`_strip_restatement` / `_RESTATE_GENERIC`——以需求原文开头的候选先剥离复述前缀（比对时剔除空白与中英文标点），只保留澄清残量；specjson@6：`_overlap_ratio` / `_core_topics` / `_RESTATE_OVERLAP` / `_TOPIC_CORE_MIN`——残量须过三道检查：含量化阈值或 `file:` 定位；与需求核心二字词覆盖率 `< 0.5`（否则判为换语序/加主语的复述）；需求核心词 ≥ 3 时覆盖率不得为 0（否则判为离题）。`CRITERIA_PROMPT` 增加「判据必须针对需求提到的对象，不要替换成需求没提到的指标」约束 |
@@ -67,6 +68,36 @@
 - **边界不吞掉真实命中**：`foo.eln` 的 `eln`、独立词 `target`、`@app.get("/export")` 的 `export`、`openpyxl` 仍命中（`.`/`"`/空格不是 `[a-z0-9]`）。`500` 这类数字词同样按边界，`app500` 不再算命中。
 - **收窄与判定必须同口径**：`prober.run` 的 feature 分支改为 `[item for item in items if mentions(item, terms)]`，不得再写一遍裸子串判断；`judge` 的反证相关性与 feature 兜底同样只用 `mentions`。
 - 词边界只影响「是否命中」，不改变 `terms` 的产生规则（`claim_terms` / `feature_terms` 逐字不变），也不改变 `scanned` 计数。
+
+## 反证相关性的中英实现词扩展（C-MATCHER@7）
+
+- **为什么需要**：`judge` 的反证路径是 `claim_terms(claim.text)` 切词后与 `NEGATION_MARKERS` 命中的证据做 `mentions` 相关性判定。中文需求切出的是中文二字词（如「用同步」「语句加锁」），而代码里的否定声明是英文（`Sync context manager entry is not supported...`），两边零重叠，真反证被相关性过滤掉。实测 10 条真反证中 7 条因此判成 `no_evidence`。
+- **新词表与函数**：`IMPL_TERM_GROUPS` 与 `FEATURE_TERM_GROUPS` 同构（每组第一个是中文词，其余是英文实现词），`impl_terms(text)` 小写化文本后「命中组内任一词即把整组去重并入」，口径与 `feature_terms` 一致。初始覆盖异步/协程、同步上下文、订阅者、分隔符、压缩、序列化、单例、重入、回调、弱引用、截断、过期、文件描述符、心跳、死锁、写者、平台、进程间等实现词汇。
+- **英文触发词走词边界**：`impl_terms` 的触发判定对 ASCII 词复用 C-MATCHER@6 的 `_latin_pattern`（`_group_word_hit`），因此 `AsyncFileLock` 里的 `sync` 是连写标识符的一部分，不触发 `("同步 with", "sync", "synchronous")`。裸子串会把它当触发词，使「AsyncFileLock 支持 async/await」这类真实现被 `asyncio.py:317` 误判为反证——20 条真实现样本的反证数会从 1 抬到 3。
+- **「同步」组收窄为 `同步 with`**：只用 `同步` 作中文触发词会让「提供进程间同步」把 `sync` 并入，同样命中 `asyncio.py:317`，误报增加。`同步 with` 对应该行真证据的 `Sync context manager` 语义，故中文触发词收窄为词组。
+- **故意不收 `("锁", "lock", "flock")`**：`lock` 在 filelock 代码里遍地都是，纳入会把 20 条真实现样本的误报抬回去。
+- **只作用于 `judge` 的反证判定**：`negation_terms` 由 `terms` 与 `impl_terms(claim.text)` 去重合并（C-MATCHER@8 起再剔除 `_GENERIC_TERMS`），仅用于 `negations` 的相关性过滤。`impl_terms` 不得进 `feature_terms`、不得进 `prober`、不得进 feature 分支的 `terms`。
+- **不变项**：`claim_terms` / `feature_terms` / `prober.py` / `pipeline.py` / `renderer.py` 输出逐字不变，`NEGATION_MARKERS` 不动；六份 `reports/fx-*.md` 必须逐字不变（`git status --short reports/` 为空）。
+
+## 反证相关性只看声明本身（C-MATCHER@8）
+
+- **为什么需要**：`mentions` 的 haystack 是 `f"{evidence.file} {evidence.snippet}"`，**文件路径参与匹配**。需求里出现包名（如 `FileLock`）时，`src/filelock/` 下**每个**否定行都会因路径命中被判为相关声明。实测「FileLock 支持用 lifetime 参数按文件年龄强制过期」的定位因此落到 `_strict.py:830`——一行讲 Termux 无 `os.link` 的注释，与需求毫无关系。
+- **另一处泛词**：`claim_terms("... preserve_lock_file=True ...")` 会切出 `true`，而 `true` 在代码里遍地都是，使 `tests/test_util.py:613`（`pytest.param(True, id="unsupported")` 的参数标识）被当成相关否定声明。
+- **新函数 `_mentions_snippet(evidence, terms)`**：与 `mentions` 同构（ASCII 走 `_latin_pattern` 词边界、中文子串），但 haystack **只用 `evidence.snippet`**，不含 `evidence.file`。理由：文件路径只能定位、不能表达语义。
+- **泛词表 `_GENERIC_TERMS = frozenset({"true", "false", "none", "null"})`**：反证相关性判定前从 `negation_terms` 中剔除，无区分度的字面量不该决定相关性。
+- **只作用于反证路径**：`judge` 内改为
+  `negation_terms = tuple(t for t in terms + tuple(x for x in impl_terms(claim.text) if x not in terms) if t not in _GENERIC_TERMS)`，
+  `negations = [e for e in relevant if _is_negation(e) and _mentions_snippet(e, negation_terms)]`。
+- **不变项**：@9 起 `mentions()` 的路径部分改为只取文件名；`claim_terms` / `feature_terms` / `impl_terms` / `NEGATION_MARKERS` / `prober.py` 不动；六份 `reports/fx-*.md` 必须逐字不变。
+- **实测取舍**（用户裁决「先修定位缺陷」）：20 条真实现 `10/9/1` → **`11/9/0`**（误报清零，且一条从被误推翻回到有证据）；10 条真反证 `3/10` → **`1/10`**，但定位准确率 `1/3` → **`1/1`**。`_strict.py:830` 与 `tests/test_util.py:613` 两处误定位消失。
+
+## 路径匹配只认文件名（C-MATCHER@9）
+
+- **为什么需要**：@8 只在反证路径上排除了文件路径，feature 分支仍用「完整路径 + snippet」。需求里出现库名（`FileLock`）时，`src/filelock/` 下每个文件都因目录名命中而成为「相关实现」——「lifetime 强制过期」判 `supported` 并定位到只沾了包名的行。
+- **新函数 `_name_and_snippet(evidence)`**：把 `evidence.file` 的 `\` 归一化为 `/` 后取**最后一段**（文件名），与 `snippet` 拼接并小写。`mentions` 改用它；`prober` 的 feature 收窄复用 `mentions`（C-PROBER@8），因此同口径受益。
+- **边界**：目录名不再参与匹配，所以 `src/pkg/cli.py` 仍能命中 `cli`（文件名表达功能），但 `src/filelock/_api.py` 不会命中 `filelock`（目录名只表示归属）。
+- **不变项**：`feature_terms` / `claim_terms` / `impl_terms` / `NEGATION_MARKERS` / 反证路径的 `_mentions_snippet` 均不动；六份 `reports/fx-*.md` 必须逐字不变。
+- **实测**：六份 `reports/fx-*.md` 逐字不变（`git status --short reports/` 为空）；四库 32 条仍 `12/19/0`（precision `12/12`、recall `12/32`）；反证样本 c02/c03 的定位从「包名下任意注释」换成语义相关行（`tests/test_soft_lifetime_warning.py:204`、`src/filelock/_descriptor.py:37`）。
 
 ## 入口兜底（C-PIPELINE@5）
 
@@ -155,3 +186,16 @@
 - **否定词限定在参数校验型异常消息内不算反证**：新增 `_EXCEPTION_GUARD`（`valueerror(` / `typeerror(` / `keyerror(` / `attributeerror(` / `assertionerror(` / `indexerror(` / `oserror(` / `lookuperror(` / `overflowerror(`）。`_is_negation_line` 逐 marker 定位：行内含 guard token 且该 marker 首次出现的下标经 `_inside_string_literal`（`text[:index]` 中 `"` 或 `'` 计数为奇数即处于引号内）判为处于字符串字面量时跳过该 marker，否则命中即返回 `True`；全部 marker 被跳过时仍按原逻辑判 `TODO_MARKERS`。`raise NotImplementedError(...)` 不在 guard 名单内，仍判为否定。`NEGATION_MARKERS` / `CAP` / `SUPPORTS` / `strength=high` / `snippet` 截断规则不变。
 - **requirements 续行拼接**：`_requirements_names` 在逐行解析前先 `re.sub(r"\\\r?\n", " ", text)` 把行尾反斜杠续行（LF 与 CRLF）拼成单行，避免 `--hash` 续行被当成独立声明。`_requirement_name` 的注释剥离、URL/路径排除与 `_NAME_SPLIT` 切分不变；不含续行的文件解析结果逐字不变。
 - **工具生成物目录排除**：`SKIP_DIRS` 追加 `.oss-scanner`（带点，与真实目录名一致），`build_index` 用 `entry.name.lower()` 全等比较，该目录整棵不进索引。既有 `cmakefiles` / `SKIP_DIR_PREFIXES` / `.ignore` 行为不变，`reports/fx-*.md` 六份零变化。
+
+## 否定作用域（C-EXTRACTOR@8）
+
+真实仓库的否定词大量出现在"不是功能缺失"的语境里，@7 仅覆盖了同一行内 `raise ValueError(...)` 一种。@8 按六种形态补齐作用域判定，全部规则只收紧、不放宽。
+
+- **标识符内的否定词不算反证**：`_is_identifier_marker(lowered, index, marker)` 在 marker 为 ASCII 时判定——marker 前一个字符或后一个字符属于 `[A-Za-z0-9_]`，或 marker 之后跳过空白紧跟 `=` 时，视为标识符或变量名用法，跳过该 marker。覆盖 `_lifetime_unsupported_reason`、`_HARD_LINK_UNSUPPORTED_ERRNOS`、`unsupported = (` 等形态。中文 marker（`不支持` 等）不参与该判定。
+- **回退/降级说明不算反证**：行内（小写化后）命中 `_FALLBACK_WORDS`（`falling back` / `fallback` / `回退` / `降级` / `退化`）时整行跳过 marker 检查。典型为「flock 在此文件系统不可用，回退到 SoftFileLock」——这句描述的是降级路径，恰恰是「自动回退」需求的实现证据，不得当作反证。
+- **测试断言内的期望消息不算反证**：行内命中 `_TEST_GUARD`（`pytest.raises` / `assertraises` / `assertwarns` / `assert_raises`）且该 marker 首次出现经 `_inside_string_literal` 判为处于字符串字面量时跳过。测试里 `match="... is not supported ..."` 是对异常文本的期望，不是代码声明。
+- **待抛消息的字符串赋值不算反证**：`_MESSAGE_ASSIGN_RE` 匹配 `^(msg|message|reason|detail|err_msg|errmsg)\s*=\s*[frbu]?['"]` 时视同 `_EXCEPTION_GUARD`，只在该 marker 处于字符串字面量内时跳过（沿用 @7 的 `_inside_string_literal` 语义）。覆盖 `msg = f"preserve_lock_file=True is not supported by ..."` 与 `msg = "run_in_executor is not supported when thread_local is True"` 这类参数组合约束。
+- **辅助判定 `_in_comment(lowered, index)`**：行（`lstrip()` 后）以 `_COMMENT_PREFIXES`（`#` / `//` / `/*` / `*`）开头，或行内首个 `#` 的下标小于 marker 下标时，判定该 marker 落在注释区（覆盖行尾注释）。
+- **代码表达式的布尔取反不算反证**：`_is_control_flow_expression(lowered, index)` 在三个条件**同时**成立时跳过该 marker——marker 不处于字符串字面量内、`_in_comment` 为假（即落在代码区）、整行不含 CJK 字符（`\u4e00`–`\u9fff`）；再要求行内命中 `_CONTROL_FLOW`（`if ` / `elif ` / `while ` / ` and ` / ` or ` / `return ` / `assert `）之一。覆盖 `if preserve and not supported:` 与 `return not supported`。注释里的自然语言否定（`# if 需要就 return，暂不支持并发`）与行尾注释里的英文否定（`x = 1  # ... not implemented`）均不满足注释区/ASCII 条件，仍判为反证；`if 不支持:` 因含 CJK 亦仍判为反证。
+- **注释里引号包裹的纯英文短语不算反证**：`_is_english_quoted_in_comment(lowered, index)` 要求 marker 满足 `_in_comment`、该 marker 处于字符串字面量内、且整行不含 CJK 字符。典型为 `# cannot name "operation not supported" as the errno here`（讲 errno 语义）。中文注释里的「暂不支持」不在引号内，仍判为反证。
+- **不变项**：`NEGATION_MARKERS` / `TODO_MARKERS` / `TODO_CONTEXT` / `_EXCEPTION_GUARD` / `CAP=40` / `SUPPORTS` / `strength=high` / `snippet` 截断 / 每行去重 / fixture 中否定为空的断言全部不变；中文注释里的「暂不支持」仍判为反证。

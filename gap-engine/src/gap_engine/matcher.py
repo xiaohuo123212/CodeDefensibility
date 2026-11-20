@@ -57,6 +57,30 @@ FEATURE_TERM_GROUPS: tuple[tuple[str, ...], ...] = (
     ("excel", "xlsx", "openpyxl", "workbook"),
 )
 
+IMPL_TERM_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("协程", "coroutine"),
+    ("异步", "async", "await"),
+    ("同步 with", "sync", "synchronous"),
+    ("订阅者", "subscriber", "receiver", "subscribe"),
+    ("信号", "signal", "emit"),
+    ("分隔符", "sep", "separator"),
+    ("压缩", "compress", "zlib", "deflate"),
+    ("时间戳", "timestamp", "max_age"),
+    ("序列化", "serializer", "serialize", "dumps", "loads"),
+    ("单例", "singleton"),
+    ("重入", "reentrant", "reentry", "recursion"),
+    ("回调", "callback", "on_acquired"),
+    ("弱引用", "weakref", "weak"),
+    ("截断", "truncate", "truncated"),
+    ("过期", "expire", "expiry", "lifetime", "max_age"),
+    ("文件描述符", "descriptor", "fileno"),
+    ("心跳", "heartbeat"),
+    ("死锁", "deadlock"),
+    ("写者", "writer"),
+    ("平台", "platform"),
+    ("进程间", "interprocess"),
+)
+
 DEPENDENCY_DECLARATIONS: tuple[str, ...] = (
     "requirements.txt",
     "requirements-dev.txt",
@@ -167,6 +191,26 @@ def feature_terms(text: str) -> tuple[str, ...]:
     return tuple(terms)
 
 
+def impl_terms(text: str) -> tuple[str, ...]:
+    """从需求文本提取对应的英文实现词（C-MATCHER@7）。
+
+    与 ``feature_terms`` 同构，但英文词的**触发**判定走 C-MATCHER@6 的 ASCII 词边界：
+    ``AsyncFileLock`` 里的 ``sync`` 是连写标识符的一部分，不应把 ``sync`` 并进来。
+    """
+    low = text.lower()
+    terms: list[str] = []
+    for group in IMPL_TERM_GROUPS:
+        if any(_group_word_hit(low, word) for word in group):
+            terms.extend(word for word in group if word not in terms)
+    return tuple(terms)
+
+
+def _group_word_hit(low: str, word: str) -> bool:
+    if word.isascii():
+        return _latin_pattern(word).search(low) is not None
+    return word in low
+
+
 def claim_terms(text: str) -> tuple[str, ...]:
     """从需求文本提取显著词：英文词取 ≥3 字符，中文按停用词切分后取 2–6 字片段。"""
     terms: list[str] = []
@@ -198,6 +242,12 @@ def _latin_pattern(term: str) -> re.Pattern[str]:
     return pattern
 
 
+def _name_and_snippet(evidence: Evidence) -> str:
+    """证据的**文件名**与代码片段（不含目录，C-MATCHER@9）。"""
+    name = evidence.file.replace("\\", "/").rsplit("/", 1)[-1]
+    return f"{name} {evidence.snippet}".lower()
+
+
 def mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
     """证据是否提到任一关键词（C-MATCHER@6）。
 
@@ -205,8 +255,31 @@ def mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
     ``channel`` / ``internal`` 这类无关标识符；边界匹配后只有真正的独立词
     （``foo.eln`` 的 ``eln``、``target``）才算命中。中文仍按子串匹配——
     中文没有词边界概念，且子串匹配是既有判定依赖的语义。
+
+    路径只取文件名（C-MATCHER@9）：目录名里的包名（``src/filelock/``）会让仓库
+    里每个文件都恒命中需求中的库名，只有文件名能表达「这个文件是什么」。
     """
-    haystack = f"{evidence.file} {evidence.snippet}".lower()
+    haystack = _name_and_snippet(evidence)
+    for term in terms:
+        if term.isascii():
+            if _latin_pattern(term.lower()).search(haystack):
+                return True
+        elif term in haystack:
+            return True
+    return False
+
+
+_GENERIC_TERMS = frozenset({"true", "false", "none", "null"})
+
+
+def _mentions_snippet(evidence: Evidence, terms: tuple[str, ...]) -> bool:
+    """反证相关性只看声明本身（C-MATCHER@8）。
+
+    文件路径只能定位、不能表达语义：需求里出现包名时，``src/<pkg>/`` 下的每个
+    否定行都会因路径命中而被当成相关声明；``True`` / ``None`` 这类字面量关键
+    词同样没有区分度，一并排除。
+    """
+    haystack = (evidence.snippet or "").lower()
     for term in terms:
         if term.isascii():
             if _latin_pattern(term.lower()).search(haystack):
@@ -227,9 +300,14 @@ def _is_dependency_declaration(evidence: Evidence) -> bool:
 
 
 def _locator_evidence(items: list[Evidence]) -> Evidence | None:
-    # 依赖声明只能证明「装了包」，指出不了功能在哪，因此定位优先避开它们
-    non_dependency = [e for e in items if not _is_dependency_declaration(e)]
-    best = _strongest(non_dependency)
+    # 依赖声明只能证明「装了包」，指出不了功能在哪，因此定位优先避开它们；
+    # 同理，非反证结论的定位不应落在一条否定声明上（C-MATCHER@8）
+    candidates = [e for e in items if not _is_dependency_declaration(e)]
+    non_negation = [e for e in candidates if not _is_negation(e)]
+    best = _strongest(non_negation)
+    if best is not None:
+        return best
+    best = _strongest(candidates)
     return best if best is not None else _strongest(items)
 
 
@@ -307,7 +385,13 @@ def judge(
 
     terms = claim_terms(claim.text)
     if terms:
-        negations = [e for e in relevant if _is_negation(e) and mentions(e, terms)]
+        # 反证相关性额外并入中英实现词（C-MATCHER@7），只作用于本处判定
+        negation_terms = tuple(
+            t
+            for t in terms + tuple(x for x in impl_terms(claim.text) if x not in terms)
+            if t not in _GENERIC_TERMS
+        )
+        negations = [e for e in relevant if _is_negation(e) and _mentions_snippet(e, negation_terms)]
         anchor = _strongest([e for e in negations if e.line is not None])
         if anchor is not None:
             supports = [e for e in relevant if not _is_negation(e)]
