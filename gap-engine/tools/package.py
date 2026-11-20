@@ -23,7 +23,10 @@ TOP_DIRS: tuple[tuple[str, str], ...] = (
 EXCLUDED_SEGMENTS = frozenset(
     {"__pycache__", ".git", ".tmp", "build", "dist", ".pytest_cache", ".mypy_cache", "node_modules"}
 )
-EXCLUDED_NAMES = frozenset({".env", ".pytest_out.txt", "coverage.xml", ".coverage"})
+# 内部规划文档不进交付包：它是"下一轮待办"，对外只会读成"还没做完"
+EXCLUDED_NAMES = frozenset(
+    {".env", ".pytest_out.txt", "coverage.xml", ".coverage", "next-round-todo.md"}
+)
 EXCLUDED_SUFFIXES = frozenset({".pyc", ".pyo"})
 EGG_INFO_SUFFIX = ".egg-info"
 # 按 zip 内路径排除：Remotion 的渲染中间产物（设计 §2.3 第 8 项）
