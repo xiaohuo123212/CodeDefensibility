@@ -1,0 +1,7 @@
+# 依赖与渲染产物不入库（npm install / npx remotion render 可重建）
+node_modules/
+out/
+
+# 渲染中间件与缓存
+*.log
+.remotion/

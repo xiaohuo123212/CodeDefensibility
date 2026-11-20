@@ -1,0 +1,15 @@
+{
+  "ready": true,
+  "cwd": "C:\\demo\\gap-engine",
+  "prompt": "demo>",
+  "commandLine": "gap spec contract\\fixtures\\fx-spec --spec contract\\fixtures\\fx-spec\\requirements.md --out reports\\fx-spec.md",
+  "outputs": [
+    {
+      "text": "report: reports\\fx-spec.md",
+      "kind": "out"
+    }
+  ],
+  "exitCode": 0,
+  "reportPath": "reports\\fx-spec.md",
+  "capturedAt": "2026-11-20T00:21:17"
+}

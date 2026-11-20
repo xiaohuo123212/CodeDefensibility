@@ -1,0 +1,18 @@
+{
+  "pages": [
+    {
+      "file": "ppt/P13.png",
+      "page": 13,
+      "width": 1920,
+      "height": 1080,
+      "sha256": "45a8cbd0c0d50a8011ea13957eb64c1566d59df9c17b7461a9f42ada36559f9e"
+    },
+    {
+      "file": "ppt/P15.png",
+      "page": 15,
+      "width": 1920,
+      "height": 1080,
+      "sha256": "39ab9a27542468d18b0b65b5eb87dd64535da4d9d213cb9b3249b8781c8ba2b7"
+    }
+  ]
+}

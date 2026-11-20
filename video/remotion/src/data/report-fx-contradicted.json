@@ -1,0 +1,18 @@
+{
+  "title": "fx-contradicted 需求对账报告",
+  "sourceMd": "gap-engine/reports/fx-contradicted.md",
+  "sourceSha256": "8bbb1309",
+  "conclusionLine": "结论：代码里有反证，与要求不一致",
+  "locationLine": "定位：app.py:9",
+  "requirementLine": "会被问：「支持 Excel 导出」的要求与代码里的否定声明冲突，最终以哪边为准？",
+  "evidenceLines": [
+    "路由/入口：1 处",
+    "app.py:7",
+    "依赖声明：1 处",
+    "requirements.txt:2",
+    "相关实现：1 处",
+    "app.py:8",
+    "否定/未实现声明：1 处",
+    "app.py:9"
+  ]
+}

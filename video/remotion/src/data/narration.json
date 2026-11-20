@@ -1,0 +1,354 @@
+{
+  "fps": 30,
+  "totalFrames": 5040,
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "-5%",
+  "fit": true,
+  "warnings": [],
+  "s1Titles": [
+    "\"支持 500 并发\"——怎么证明？",
+    "没人告诉他，代码缺了哪一块证据"
+  ],
+  "s7Outro": "要求做的，真的做了——做不到的那几条，它让你看见，而不是替你圆",
+  "sentences": [
+    {
+      "id": 1,
+      "no": "①",
+      "scene": "S1",
+      "text": "每个做过项目的人都被问过这句话：你说支持 500 并发，怎么证明？",
+      "audioFile": "audio/01.mp3",
+      "durationMs": 6576,
+      "audioSha256": "c1b87fa1d41b8781638e6febd555552189c89ef4eb599767f644aa8f86f2c6a2",
+      "startFrame": 6,
+      "endFrame": 203
+    },
+    {
+      "id": 2,
+      "no": "②",
+      "scene": "S1",
+      "text": "绝大多数人答不上来。不是撒谎，是从来没人告诉他，代码缺了哪一块证据。",
+      "audioFile": "audio/02.mp3",
+      "durationMs": 7671,
+      "audioSha256": "46557a76bfff83a79c9a0fe0e9bdaeb4af52d46ae079b775327336cc52ee7a4b",
+      "startFrame": 209,
+      "endFrame": 439
+    },
+    {
+      "id": 3,
+      "no": "③",
+      "scene": "S2",
+      "text": "我们做了一个对账引擎。",
+      "audioFile": "audio/03.mp3",
+      "durationMs": 2589,
+      "audioSha256": "812bdaf96ab0d0d95f3a710aeeaff5d8f14aca95341f2b513377815640d6d2d6",
+      "startFrame": 462,
+      "endFrame": 540
+    },
+    {
+      "id": 4,
+      "no": "④",
+      "scene": "S2",
+      "text": "输入一份需求清单和一个代码仓库，一条命令。",
+      "audioFile": "audio/04.mp3",
+      "durationMs": 4866,
+      "audioSha256": "98d7c69bba42bcfeb7daaddd5c6a3ea99edb75c1d85e46499cd27df4485270da",
+      "startFrame": 546,
+      "endFrame": 692
+    },
+    {
+      "id": 5,
+      "no": "⑤",
+      "scene": "S2",
+      "text": "它输出：要求做的，和代码里有的，差在哪。",
+      "audioFile": "audio/05.mp3",
+      "durationMs": 4879,
+      "audioSha256": "248165a86e80225bafad8081e53aa5466829414cbf4e92a0503dac1177a16d19",
+      "startFrame": 698,
+      "endFrame": 844
+    },
+    {
+      "id": 6,
+      "no": "⑥",
+      "scene": "S3",
+      "text": "先看第一段：这条要求能不能验收。",
+      "audioFile": "audio/06.mp3",
+      "durationMs": 4063,
+      "audioSha256": "2fc47fe2b34df0f0bfc6ed5b9d426be9cbd9d56f8507ce4483834383dd1ed394",
+      "startFrame": 870,
+      "endFrame": 992
+    },
+    {
+      "id": 7,
+      "no": "⑦",
+      "scene": "S3",
+      "text": "\"高性能\"没法验收，它给出可测判据，并标明这是默认判据。",
+      "audioFile": "audio/07.mp3",
+      "durationMs": 6550,
+      "audioSha256": "c2f0807409513f7e2fde422e5e2fd285591837a974d805506ce7002d131f4c3a",
+      "startFrame": 998,
+      "endFrame": 1194
+    },
+    {
+      "id": 8,
+      "no": "⑧",
+      "scene": "S4",
+      "text": "这一条是重点。",
+      "audioFile": "audio/08.mp3",
+      "durationMs": 1971,
+      "audioSha256": "b22347068d56c5d2cf5cf6d5f8b425b46a044ef6e5a9fadf5aa0362eda5e8d9f",
+      "startFrame": 1290,
+      "endFrame": 1349
+    },
+    {
+      "id": 9,
+      "no": "⑨",
+      "scene": "S4",
+      "text": "它没有说\"你没做\"，它说：压测脚本扫过 1 处，并发原语扫过 1 处，worker 配置扫过 4 处，连接池扫过 4 处，都没有。",
+      "audioFile": "audio/09.mp3",
+      "durationMs": 11684,
+      "audioSha256": "ae17ce40ac6b503f8286adbc113d3e3a6f4a3584196c7dc106b59877e1ac6d0a",
+      "startFrame": 1355,
+      "endFrame": 1706
+    },
+    {
+      "id": 10,
+      "no": "⑩",
+      "scene": "S4",
+      "text": "而且它换过假设再搜了一遍：会不会写在 README 里、文档里、博客链接里。",
+      "audioFile": "audio/10.mp3",
+      "durationMs": 7497,
+      "audioSha256": "c05b72417cc11ddbc966b51305365cbfe2cf78d5d5c25a40dc3bf8abc7e80dee",
+      "startFrame": 1712,
+      "endFrame": 1937
+    },
+    {
+      "id": 11,
+      "no": "⑪",
+      "scene": "S4",
+      "text": "最后的结果是可算的：6 类 15 处。",
+      "audioFile": "audio/11.mp3",
+      "durationMs": 3905,
+      "audioSha256": "4f0cbfdaee11825526fd755e543d37983891b864f2f623d40819b730102f4cca",
+      "startFrame": 1943,
+      "endFrame": 2060
+    },
+    {
+      "id": 12,
+      "no": "⑫",
+      "scene": "S4",
+      "text": "判据不是它自己定的，是外置的，还要提出人确认。",
+      "audioFile": "audio/12.mp3",
+      "durationMs": 5208,
+      "audioSha256": "05b5779a24dd4b53288a48ce7e15b861a4658e7e2b2f84353eb50eeedc802ac8",
+      "startFrame": 2066,
+      "endFrame": 2222
+    },
+    {
+      "id": 13,
+      "no": "⑬",
+      "scene": "S4",
+      "text": "该补什么也写清楚了：补一个压测脚本和结果文件，说明并发数怎么对上配置。",
+      "audioFile": "audio/13.mp3",
+      "durationMs": 7642,
+      "audioSha256": "b74b23191ca6c8fe75d14e9bef4bd51b46ab774d4dddc247f014f884f1fe6f31",
+      "startFrame": 2228,
+      "endFrame": 2457
+    },
+    {
+      "id": 14,
+      "no": "⑭",
+      "scene": "S4",
+      "text": "这就是我们唯一比别人多做的一个动作：把一条结论的轨迹，完整摊开给你看。",
+      "audioFile": "audio/14.mp3",
+      "durationMs": 7221,
+      "audioSha256": "74e6f754b9889b264187a55138f479ea344b6e7df77736c77c9b92fe73069f15",
+      "startFrame": 2463,
+      "endFrame": 2680
+    },
+    {
+      "id": 15,
+      "no": "⑮",
+      "scene": "S4",
+      "text": "查过哪里、换过什么假设、判据从哪来、该补什么——四件事都能复核。",
+      "audioFile": "audio/15.mp3",
+      "durationMs": 7392,
+      "audioSha256": "12482d8c2a7fe606cd37631071171f4ce64d0edc99cb4f5ed152f412e87ca300",
+      "startFrame": 2686,
+      "endFrame": 2908
+    },
+    {
+      "id": 16,
+      "no": "⑯",
+      "scene": "S4",
+      "text": "输出不等于证据。",
+      "audioFile": "audio/16.mp3",
+      "durationMs": 2182,
+      "audioSha256": "953fafc8f9405a0e42aa230a0ebd805d7c1340f4603e4e572800e1c40ece4aa0",
+      "startFrame": 2914,
+      "endFrame": 2979
+    },
+    {
+      "id": 17,
+      "no": "⑰",
+      "scene": "S5",
+      "text": "还有更硬的一种：反证。",
+      "audioFile": "audio/17.mp3",
+      "durationMs": 2774,
+      "audioSha256": "bc879944228ada8c9483ab79175820a00d2e6a17f0d6a9ff665ff3d3600bc7d9",
+      "startFrame": 3330,
+      "endFrame": 3413
+    },
+    {
+      "id": 18,
+      "no": "⑱",
+      "scene": "S5",
+      "text": "这份报告里，要求写支持 Excel 导出，代码里有一行显式否定声明，它把行号贴出来了。",
+      "audioFile": "audio/18.mp3",
+      "durationMs": 8642,
+      "audioSha256": "118b49291063526fd717e6c98c5d6e2cfbab5464cd5da40ef171713a3b585653",
+      "startFrame": 3419,
+      "endFrame": 3678
+    },
+    {
+      "id": 19,
+      "no": "⑲",
+      "scene": "S5",
+      "text": "贴不出行号的时候，它一律说\"没找到\"，不说\"你没有\"。",
+      "audioFile": "audio/19.mp3",
+      "durationMs": 5655,
+      "audioSha256": "ab15dc0a6fb79e36051b554d4baf7ab8c885543e303efddba436fd99d35b64a9",
+      "startFrame": 3684,
+      "endFrame": 3854
+    },
+    {
+      "id": 20,
+      "no": "⑳",
+      "scene": "S6",
+      "text": "指标我们不敢先写。",
+      "audioFile": "audio/20.mp3",
+      "durationMs": 2353,
+      "audioSha256": "49e4661fd2bf50ab9b006c27c45dd684ea9d5aba7a1dc3a7d1096262f981fb7d",
+      "startFrame": 3870,
+      "endFrame": 3941
+    },
+    {
+      "id": 21,
+      "no": "㉑",
+      "scene": "S6",
+      "text": "25 条结论，由需求提出人本人判定；认可率、定位率、漏报率、误报率，回执回来再填，现在全部是占位。",
+      "audioFile": "audio/21.mp3",
+      "durationMs": 11329,
+      "audioSha256": "784987b1a58f97ff373d59e6122d8d6d7c72cdd2a20c7b0bf68fdd420d49203e",
+      "startFrame": 3947,
+      "endFrame": 4287
+    },
+    {
+      "id": 22,
+      "no": "㉒",
+      "scene": "S6",
+      "text": "漏报和误报分开报，这是我们最容易被问倒的地方，也是我们主动划线的地方。",
+      "audioFile": "audio/22.mp3",
+      "durationMs": 7432,
+      "audioSha256": "17347d57f32e65505831993705bb68d517aae2f6d37ac9f45806026ceed94386",
+      "startFrame": 4293,
+      "endFrame": 4516
+    },
+    {
+      "id": 23,
+      "no": "㉓",
+      "scene": "S7",
+      "text": "代码、测试、留痕都在包里，全部可用码道复现。",
+      "audioFile": "audio/23.mp3",
+      "durationMs": 5550,
+      "audioSha256": "0afb3af9541964abaa3c6c77c954ed2d45753040943321a85c17e51c971950c2",
+      "startFrame": 4530,
+      "endFrame": 4696
+    },
+    {
+      "id": 24,
+      "no": "㉔",
+      "scene": "S7",
+      "text": "一句话：能证明要求做的真的做了；做不到的那几条，它让你看见，而不是替你圆。",
+      "audioFile": "audio/24.mp3",
+      "durationMs": 8129,
+      "audioSha256": "879d0f599c9b27cae5bb809411959fb32705ab191a2108690dc348e44a1415f1",
+      "startFrame": 4702,
+      "endFrame": 4946
+    }
+  ],
+  "scenes": [
+    {
+      "id": "S1",
+      "startFrame": 0,
+      "endFrame": 456,
+      "sentenceIds": [
+        1,
+        2
+      ]
+    },
+    {
+      "id": "S2",
+      "startFrame": 456,
+      "endFrame": 864,
+      "sentenceIds": [
+        3,
+        4,
+        5
+      ]
+    },
+    {
+      "id": "S3",
+      "startFrame": 864,
+      "endFrame": 1284,
+      "sentenceIds": [
+        6,
+        7
+      ]
+    },
+    {
+      "id": "S4",
+      "startFrame": 1284,
+      "endFrame": 3324,
+      "sentenceIds": [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    },
+    {
+      "id": "S5",
+      "startFrame": 3324,
+      "endFrame": 3864,
+      "sentenceIds": [
+        17,
+        18,
+        19
+      ]
+    },
+    {
+      "id": "S6",
+      "startFrame": 3864,
+      "endFrame": 4524,
+      "sentenceIds": [
+        20,
+        21,
+        22
+      ]
+    },
+    {
+      "id": "S7",
+      "startFrame": 4524,
+      "endFrame": 5040,
+      "sentenceIds": [
+        23,
+        24
+      ]
+    }
+  ]
+}
