@@ -119,15 +119,22 @@ def check_narration(narration: dict) -> None:
 
     for item in sentences:
         audio = PUBLIC_DIR / str(item.get("audioFile", ""))
-        if not audio.is_file():
-            raise RenderError(f"缺少旁白音频：{audio}")
-        if audio.stat().st_size < MIN_AUDIO_BYTES:
-            raise RenderError(f"旁白音频过小，可能是空文件：{audio.name}")
-        if sha256_file(audio) != item.get("audioSha256"):
-            raise RenderError(f"旁白音频与 narration.json 记录的 sha256 不一致：{audio.name}")
+        # 人声旁白已由背景音乐替代（Video.tsx 不再引用 audioFile）。
+        # 音轨文件若仍存在才校验完整性，避免恢复人声时跳过检查。
+        if audio.is_file():
+            if audio.stat().st_size < MIN_AUDIO_BYTES:
+                raise RenderError(f"旁白音频过小，可能是空文件：{audio.name}")
+            if sha256_file(audio) != item.get("audioSha256"):
+                raise RenderError(f"旁白音频与 narration.json 记录的 sha256 不一致：{audio.name}")
         start, end = item.get("startFrame"), item.get("endFrame")
         if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start < end <= TOTAL_FRAMES:
             raise RenderError(f"旁白 {item.get('id')} 的帧区间非法：{start}..{end}")
+
+    bgm = PUBLIC_DIR / "audio" / "bgm.wav"
+    if not bgm.is_file():
+        raise RenderError(f"缺少背景音乐：{bgm}（由 scripts/make_music.py 生成）")
+    if bgm.stat().st_size < MIN_AUDIO_BYTES:
+        raise RenderError(f"背景音乐过小，可能是空文件：{bgm.name}")
 
     by_scene: dict[str, list[dict]] = {}
     for item in sentences:
