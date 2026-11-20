@@ -14,9 +14,14 @@ from gap_engine.matcher import (
     QUESTION_TEMPLATES,
     FEATURE_TERM_GROUPS,
     IMPL_TERM_GROUPS,
+    _DEF_LINE_RE,
+    _IMPORT_LINE_RE,
+    _claim_params,
     _is_dependency_declaration,
     _is_negation,
+    _is_test_file,
     _locator_evidence,
+    _support_candidates,
     claim_terms,
     feature_terms,
     fix,
@@ -566,9 +571,12 @@ def test_impl_terms_do_not_admit_unrelated_negation() -> None:
 
     verdict = judge(claim, [support, unrelated], _trace())
 
-    assert verdict.status is Status.supported
+    # C-MATCHER@10：``AsyncFileLock`` 是异步锁，``asyncio.py:330`` 的 ``with`` 出现在
+    # async 上下文，对「同步 with」是语义错配；@10 之前只看「with」这个词才判 supported。
+    # 本用例真正要守的是「不相关的 Windows 否定声明不构成反证」。
+    assert verdict.status is Status.no_evidence
+    assert verdict.status is not Status.contradicted
     assert verdict.locator is not None
-    assert verdict.locator.line == 330
 
 def test_negation_relevance_ignores_file_path_package_name() -> None:
     # C-MATCHER@8：``src/filelock/`` 路径命中 terms 里的 ``filelock``，不能让一行
@@ -649,3 +657,156 @@ def test_feature_judgment_does_not_match_package_name_in_path() -> None:
 
     assert verdict.status is Status.no_evidence
     assert verdict.locator is None
+
+
+def test_claim_params_returns_synonym_groups() -> None:
+    # 显式 k=v 各自成一组，组间 AND
+    assert _claim_params("AsyncFileLock 在 thread_local=True 时仍支持 run_in_executor=True") == (
+        ("thread_local",),
+        ("run_in_executor",),
+    )
+    # impl_terms 命中的概念整组入表，组内 OR
+    assert _claim_params("支持用同步 with 语句加锁") == (("同步 with", "sync", "synchronous"),)
+    assert _claim_params("SoftFileLease 提供带心跳的过期声明") == (
+        ("过期", "expire", "expiry", "lifetime", "max_age"),
+        ("心跳", "heartbeat"),
+    )
+    assert _claim_params("支持 Excel 导出") == ()
+    # true/false 这类字面量没有区分度，不进参数表
+    assert _claim_params("SoftFileLock 支持 preserve_lock_file=True") == (("preserve_lock_file",),)
+
+
+def test_is_test_file_detection() -> None:
+    for path in (
+        "tests/test_a.py",
+        "tests/async_filelock_cancellation_helpers.py",
+        "src/pkg/tests/helpers.py",
+        "src/test_util.py",
+        "test_export.py",
+        "tests/nested/test_b.py",
+    ):
+        assert _is_test_file(_ev(EvidenceKind.code, [ClaimType.feature], Strength.low, path)), path
+
+    for path in ("src/testing/helpers.py", "src/app.py", "tests_utils/app.py"):
+        assert not _is_test_file(_ev(EvidenceKind.code, [ClaimType.feature], Strength.low, path)), path
+
+
+def test_import_and_def_line_patterns() -> None:
+    assert _IMPORT_LINE_RE.match("from ._api import ExtraValue")
+    assert _IMPORT_LINE_RE.match("    import openpyxl")
+    assert not _IMPORT_LINE_RE.match("imports = []")
+
+    assert _DEF_LINE_RE.match("def run_in_executor(self):")
+    assert _DEF_LINE_RE.match("    async def acquire(self):")
+    assert not _DEF_LINE_RE.match("    return definition(value)")
+
+
+def test_import_line_alone_is_not_positive_evidence() -> None:
+    claim = _claim(ClaimType.feature, "Signer 支持自定义密钥派生")
+    imp = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/itsdangerous/signer.py",
+        15,
+        "from itsdangerous import Signer",
+    )
+
+    verdict = judge(claim, [imp], _trace())
+
+    assert verdict.status is Status.no_evidence
+    assert verdict.reason == "仅见名称或签名，未见声称参数组合的实现"
+    assert verdict.locator is not None
+    assert (verdict.locator.file, verdict.locator.line) == ("src/itsdangerous/signer.py", 15)
+
+
+def test_test_file_is_not_positive_evidence_for_feature() -> None:
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    in_tests = _ev(
+        EvidenceKind.code, [ClaimType.feature], Strength.high, "tests/test_export.py", 11, "rows = export_rows()"
+    )
+    assert judge(claim, [in_tests], _trace()).status is Status.no_evidence
+
+    in_src = _ev(
+        EvidenceKind.code, [ClaimType.feature], Strength.high, "src/app.py", 11, "rows = export_rows()"
+    )
+    verdict = judge(claim, [in_src], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.file == "src/app.py"
+
+
+def test_test_file_still_counts_for_testing_claims() -> None:
+    claim = _claim(ClaimType.testing, "测试覆盖率 80%")
+    test_ev = _ev(EvidenceKind.test, [ClaimType.testing], Strength.high, "tests/test_calc.py", 11, "def test_add():")
+    cover = _ev(EvidenceKind.test, [ClaimType.testing], Strength.high, "coverage.xml", 1, "<coverage/>")
+
+    verdict = judge(claim, [test_ev, cover], _trace())
+
+    assert verdict.status is Status.supported
+
+
+def test_def_signature_without_claim_params_is_not_positive_evidence() -> None:
+    claim = _claim(ClaimType.feature, "AsyncFileLock 在 thread_local=True 时仍支持 run_in_executor=True")
+    assert _claim_params(claim.text) == (("thread_local",), ("run_in_executor",))
+
+    sig = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "src/filelock/_api.py", 801, "def run_in_executor(self):")
+    verdict = judge(claim, [sig], _trace())
+
+    assert verdict.status is Status.no_evidence
+    assert verdict.reason == "仅见名称或签名，未见声称参数组合的实现"
+    assert verdict.evidence_ids == [sig.id]
+
+
+def test_support_line_covering_all_claim_params_is_positive_evidence() -> None:
+    claim = _claim(ClaimType.feature, "AsyncFileLock 在 thread_local=True 时仍支持 run_in_executor=True")
+    body = _ev(
+        EvidenceKind.code,
+        [ClaimType.feature],
+        Strength.high,
+        "src/filelock/_api.py",
+        806,
+        "self._run_in_executor = thread_local and run_in_executor",
+    )
+
+    verdict = judge(claim, [body], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.file == "src/filelock/_api.py"
+
+
+def test_empty_claim_params_keeps_signature_line_supported() -> None:
+    # 无参数声称不启用参数覆盖要求，行为与 C-MATCHER@9 一致
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    assert _claim_params(claim.text) == ()
+
+    sig = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 5, "def export_rows():")
+
+    verdict = judge(claim, [sig], _trace())
+
+    assert verdict.status is Status.supported
+    assert verdict.locator is not None
+    assert verdict.locator.line == 5
+
+
+def test_support_candidates_drop_weak_forms_but_keep_relevant() -> None:
+    claim = _claim(ClaimType.feature, "支持 Excel 导出")
+    imp = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 1, "from openpyxl import Workbook")
+    test = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "tests/test_export.py", 2, "rows = export_rows()")
+    real = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "src/app.py", 9, "workbook = Workbook()")
+
+    assert _claim_params(claim.text) == ()
+    assert _support_candidates(claim, [imp, test, real]) == [real]
+    assert judge(claim, [imp, test, real], _trace()).status is Status.supported
+
+
+def test_locator_evidence_prefers_non_test_non_import() -> None:
+    imp = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "app.py", 1, "from openpyxl import Workbook")
+    test = _ev(EvidenceKind.code, [ClaimType.feature], Strength.high, "tests/test_a.py", 2, "x = 1")
+    real = _ev(EvidenceKind.code, [ClaimType.feature], Strength.low, "app.py", 9, '@app.get("/export")')
+
+    assert _locator_evidence([imp, test, real]) is real
+    # 只有弱形态时回退到原层级，不返回 None
+    assert _locator_evidence([imp, test]) is not None

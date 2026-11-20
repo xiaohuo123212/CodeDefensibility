@@ -122,6 +122,12 @@ _WORD_RE = re.compile(r"[a-z0-9_]+")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]+")
 _STOPWORD_RE = re.compile("|".join(CLAIM_STOPWORDS))
 
+# 正证据的最低形态（C-MATCHER@10）：import 行只证明名字可用，def 签名行只证明名字存在
+_IMPORT_LINE_RE = re.compile(r"^\s*(from\s+\S+\s+)?import\s")
+_DEF_LINE_RE = re.compile(r"^\s*(async\s+)?def\s+\w+\s*\(")
+
+_PARAM_RE = re.compile(r"(?i)\b([a-z_][a-z0-9_]{2,})\s*=\s*(?:true|false|\d+)")
+
 _STRENGTH_RANK: dict[Strength, int] = {
     Strength.high: 3,
     Strength.medium: 2,
@@ -272,6 +278,33 @@ def mentions(evidence: Evidence, terms: tuple[str, ...]) -> bool:
 _GENERIC_TERMS = frozenset({"true", "false", "none", "null"})
 
 
+def _claim_params(text: str) -> tuple[tuple[str, ...], ...]:
+    """需求里一行实现必须同时覆盖的参数组（C-MATCHER@10）。
+
+    返回值是**参数组集**：每个元素是一组同义词，组间 AND、组内 OR。
+    显式 ``k=v`` 的参数名各自成一组；命中的 ``IMPL_TERM_GROUPS`` 概念整组成为一组
+    （``过期``/``expire``/``expiry``/``lifetime``/``max_age`` 是同一概念的不同说法，
+    只需出现一个）。``_GENERIC_TERMS`` 不进组；组集为空时不启用覆盖要求。
+    """
+    groups: list[tuple[str, ...]] = []
+    for name in _PARAM_RE.findall(text):
+        low = name.lower()
+        group = (low,)
+        if low not in _GENERIC_TERMS and group not in groups:
+            groups.append(group)
+    low = text.lower()
+    for group in IMPL_TERM_GROUPS:
+        if any(_group_word_hit(low, word) for word in group):
+            groups.append(tuple(word.lower() for word in group))
+    return tuple(groups)
+
+
+def _is_test_file(evidence: Evidence) -> bool:
+    path = "/" + evidence.file.replace("\\", "/").lower().lstrip("/")
+    name = path.rsplit("/", 1)[-1]
+    return "/tests/" in path or "/test_" in path or name.startswith("test_")
+
+
 def _mentions_snippet(evidence: Evidence, terms: tuple[str, ...]) -> bool:
     """反证相关性只看声明本身（C-MATCHER@8）。
 
@@ -299,16 +332,46 @@ def _is_dependency_declaration(evidence: Evidence) -> bool:
     return name in DEPENDENCY_DECLARATIONS or name.startswith("requirements")
 
 
+def _support_candidates(claim: Claim, relevant: list[Evidence]) -> list[Evidence]:
+    """通过最低形态过滤的正证据（C-MATCHER@10）。
+
+    import 行只证明名字可用、``tests/*`` 只证明测试里提过、纯 ``def`` 签名只证明名字
+    存在——三者都不能证明声称的参数组合被支持。需求没给参数时不做参数覆盖要求。
+    """
+    params = _claim_params(claim.text)
+    skip_tests = claim.type is not ClaimType.testing
+    candidates: list[Evidence] = []
+    for item in relevant:
+        if _is_negation(item):
+            continue
+        snippet = item.snippet or ""
+        if _IMPORT_LINE_RE.match(snippet):
+            continue
+        if skip_tests and _is_test_file(item):
+            continue
+        # _DEF_LINE_RE 命中的签名行与普通行同一口径：有参数声称时要求整行覆盖全部参数组
+        if params and not all(_mentions_snippet(item, group) for group in params):
+            continue
+        candidates.append(item)
+    return candidates
+
+
 def _locator_evidence(items: list[Evidence]) -> Evidence | None:
     # 依赖声明只能证明「装了包」，指出不了功能在哪，因此定位优先避开它们；
-    # 同理，非反证结论的定位不应落在一条否定声明上（C-MATCHER@8）
+    # 同理，非反证结论的定位不应落在一条否定声明、tests/ 或 import 行上（C-MATCHER@10）
     candidates = [e for e in items if not _is_dependency_declaration(e)]
-    non_negation = [e for e in candidates if not _is_negation(e)]
-    best = _strongest(non_negation)
-    if best is not None:
-        return best
-    best = _strongest(candidates)
-    return best if best is not None else _strongest(items)
+    real = [
+        e
+        for e in candidates
+        if not _is_negation(e)
+        and not _is_test_file(e)
+        and not _IMPORT_LINE_RE.match(e.snippet or "")
+    ]
+    for tier in (real, [e for e in candidates if not _is_negation(e)], candidates):
+        best = _strongest(tier)
+        if best is not None:
+            return best
+    return _strongest(items)
 
 
 def _coverage(trace: list[SearchProbe]) -> Coverage:
@@ -478,16 +541,30 @@ def judge(
             rounds,
         )
 
+    supports = _support_candidates(claim, relevant)
+    if not supports:
+        return _verdict(
+            claim,
+            Status.no_evidence,
+            Confidence.low,
+            _locator(_locator_evidence(relevant)),
+            _coverage(trace),
+            relevant,
+            "仅见名称或签名，未见声称参数组合的实现",
+            trace,
+            rounds,
+        )
+
     confidence = (
         Confidence.high
-        if any(e.strength is Strength.high for e in relevant)
+        if any(e.strength is Strength.high for e in supports)
         else Confidence.medium
     )
     return _verdict(
         claim,
         Status.supported,
         confidence,
-        _locator(_locator_evidence(relevant)),
+        _locator(_locator_evidence(supports)),
         _coverage(trace),
         relevant,
         "找到支持证据",

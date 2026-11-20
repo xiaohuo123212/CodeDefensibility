@@ -1,4 +1,4 @@
-# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6/@7/@8/@9 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7/@8 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@6） / C-SPEC@2/@3）
+# gap-engine 契约（C-SCHEMA@1 / C-PRIORITY@1 / C-TRACE@2 / C-INDEX@2/@3/@4 / C-MATCHER@5/@6/@7/@8/@9/@10 / C-PROBER@5/@7/@8 / C-PIPELINE@5/@6/@7 / C-EXTRACTOR@4/@5/@6/@7/@8 / C-RENDERER@7/@8/@9 / C-DEMO@2 / C-LLM@1（specjson@6） / C-SPEC@2/@3）
 
 > 本文件是人可读镜像，实现以 `src/gap_engine/` 与 `demo/` 为准。每个 AI 会话开始前先读这十二句。
 
@@ -25,7 +25,7 @@
 | C-TRACE@2 | `src/gap_engine/trace.py` | `TraceSummary` / `summarize` / `headline`；@2：`distinct_scanned`（按 `(probe, target)` 去重） |
 | C-INDEX@2/@3/@4 | `src/gap_engine/index.py` | `SKIP_DIRS` / `SKIP_DIR_PREFIXES` / `IGNORE_FILE` / `TEXT_SUFFIXES` / `RepoIndex`（含 `truncated`）/ `build_index`；@4：`SKIP_DIRS` 追加 `.oss-scanner` |
 | C-PROBER@5/@7/@8 | `src/gap_engine/prober.py` | `PLAN` / `ALTERNATE_PLANS` / `plan(claim, round=1)` / `run(claim, index, round=1)` / `CANDIDATE_FILES`；@7：「相关实现」改指 `symbols`、feature 收窄兜底 `claim_terms`；@8：收窄复用 `matcher.mentions` |
-| C-MATCHER@5/@6/@7/@8/@9 | `src/gap_engine/matcher.py` | `judge`（feature 分支的相关性兜底）、`feature_terms` / `claim_terms`、`CONTRADICTED_QUESTION_TEMPLATE`（`contradicted` 判定）；@6：`mentions`（ASCII 词边界匹配）；@7：`IMPL_TERM_GROUPS` / `impl_terms`（反证相关性的中英实现词扩展）；@8：`_mentions_snippet` / `_GENERIC_TERMS`（反证相关性只看声明本身）；@9：`_name_and_snippet`（`mentions` 的路径只取文件名） |
+| C-MATCHER@5/@6/@7/@8/@9/@10 | `src/gap_engine/matcher.py` | `judge`（feature 分支的相关性兜底）、`feature_terms` / `claim_terms`、`CONTRADICTED_QUESTION_TEMPLATE`（`contradicted` 判定）；@6：`mentions`（ASCII 词边界匹配）；@7：`IMPL_TERM_GROUPS` / `impl_terms`（反证相关性的中英实现词扩展）；@8：`_mentions_snippet` / `_GENERIC_TERMS`（反证相关性只看声明本身）；@9：`_name_and_snippet`（`mentions` 的路径只取文件名）；@10：`_claim_params` / `_support_candidates` / `_IMPORT_LINE_RE` / `_DEF_LINE_RE` / `_is_test_file`（正证据最低形态与参数覆盖） |
 | C-PIPELINE@5/@6/@7 | `src/gap_engine/pipeline.py` | `analyze_repo` / `analyze_spec` 的 `max_rounds` 与挑战循环（`_judge_one`：只有 `no_evidence` 进第 2 轮）；`_facts` 一句话的入口三分支；@6：`_route_hits` / `_route_files` 与 `_overview` 入口行；@7：`_scope_verdict` 判定域短路 |
 | C-EXTRACTOR@4 | `src/gap_engine/extractors/artifact.py` | `extract`（`kind="bench"`、`strength="medium"`、`CAP=40`） |
 | C-EXTRACTOR@5 | `src/gap_engine/extractors/negation.py` | `NEGATION_MARKERS` / `extract`（显式否定声明） |
@@ -97,7 +97,27 @@
 - **新函数 `_name_and_snippet(evidence)`**：把 `evidence.file` 的 `\` 归一化为 `/` 后取**最后一段**（文件名），与 `snippet` 拼接并小写。`mentions` 改用它；`prober` 的 feature 收窄复用 `mentions`（C-PROBER@8），因此同口径受益。
 - **边界**：目录名不再参与匹配，所以 `src/pkg/cli.py` 仍能命中 `cli`（文件名表达功能），但 `src/filelock/_api.py` 不会命中 `filelock`（目录名只表示归属）。
 - **不变项**：`feature_terms` / `claim_terms` / `impl_terms` / `NEGATION_MARKERS` / 反证路径的 `_mentions_snippet` 均不动；六份 `reports/fx-*.md` 必须逐字不变。
-- **实测**：六份 `reports/fx-*.md` 逐字不变（`git status --short reports/` 为空）；四库 32 条仍 `12/19/0`（precision `12/12`、recall `12/32`）；反证样本 c02/c03 的定位从「包名下任意注释」换成语义相关行（`tests/test_soft_lifetime_warning.py:204`、`src/filelock/_descriptor.py:37`）。
+- **实测**：六份 `reports/fx-*.md` 逐字不变（`git status --short gap-engine/reports/` 为空）。30 条真反证 `supported / no_evidence / contradicted` = **6 / 23 / 1**（6+23+1=30，无判定域外、无不可验收），`supported` 由 18 降到 **6**。32 条真实现 = **supported 8 / 查过没找到 19 / 判定域外 4 / 不可验收 1**（8+19+4+1=32，`contradicted` 0），`supported` 由 12 降到 **8**；precision `N=8/8`（分母 = 确定判断 supported 8 + contradicted 0），recall `N=8/32`，按可判 27 条口径 `N=8/27`。4 条降级原因：`支持可取消的 acquire` 与 `AsyncFileLock 支持自定义 executor 与事件循环` 的正证据全在 `tests/`（`tests/test_async_filelock_acquire_cancellation.py:28`、`tests/test_async_filelock_runner_shutdown.py:23`、`tests/test_async_filelock_transition_admission.py:31`），测试里的同名调用不证明实现支持该参数组合；`SoftFileLease 提供带心跳的过期声明` 与 `SoftFileLease 支持 on_compromise 回调` 的唯一证据是 `src/filelock/_lease.py:62 class SoftFileLease(MarkerSoftFileLock):`，类声明行只证明类存在与基类，不证明参数级功能。
+
+## 正证据的最低形态与参数覆盖（C-MATCHER@10）
+
+- **为什么需要**：30 条真反证样本（`对账引擎/评测-引擎质量/anchor-neg-30.md`）里 18 条被判 `supported`，定位**全部**是 `import` 行（`signer.py:15`）、`tests/*`（`tests/test_leak.py:11`、`tests/async_filelock_cancellation_helpers.py:15`）或纯 `def` 签名（`_api.py:801 def run_in_executor`）。这些行只能证明「名字存在」，不能证明声称的参数组合被支持。例：声称「AsyncFileLock 在 `thread_local=True` 时仍支持 `run_in_executor=True`」，`_api.py:801` 只提到了 `run_in_executor`。
+- **新函数 `_claim_params(text) -> tuple[tuple[str, ...], ...]`**：返回**参数组集**，每个元素是一组同义词。成组规则逐条如下：
+  - 显式 `k=v`：按 `(?i)\b([a-z_][a-z0-9_]{2,})\s*=\s*(?:true|false|\d+)` 提取参数名并小写化，**每个参数名各自成为一个单元素组** `(name,)`；`_GENERIC_TERMS`（`true`/`false`/`none`/`null`）不进组，同名只保留一组。
+  - 概念同义词：`impl_terms` 命中的每个 `IMPL_TERM_GROUPS` 组，**整组按原样**（该组全部词，含中文词，小写化）成为一个组，因此 `过期`/`expire`/`expiry`/`lifetime`/`max_age` 只需出现一个。`impl_terms` 的每个词都归属于它所在的组，**不存在「不属于任何显式参数而被丢弃」的词**，也不存在把某个 impl 词塞进显式参数组的情况；两类组之间互不合并。
+  - 组集为空（既无显式 `k=v`、`impl_terms` 也为空）时不启用参数覆盖要求，行为与 @9 完全一致。
+- **参数覆盖要求（组间 AND、组内 OR）**：`_claim_params` 非空时，判定式固定为 `all(_mentions_snippet(item, group) for group in _claim_params(claim.text))`——每个组必须被命中（组内任一词出现即算该组命中），所有组都命中才算有效正证据；`_mentions_snippet` 对 ASCII 词走 `_latin_pattern` 词边界（复用 C-MATCHER@6）、对中文走子串匹配。
+- **弱支持形态**（不计入 `supported` 候选，但仍留在 `relevant` 供报告展示）：
+  - `_IMPORT_LINE_RE = re.compile(r"^\s*(from\s+\S+\s+)?import\s")` 命中者；
+  - `_is_test_file(evidence)`：路径（`\` 归一化为 `/`）含 `/tests/`、`/test_/` 或文件名以 `test_` 开头；仅当 `claim.type is not ClaimType.testing` 时排除；
+  - `_DEF_LINE_RE = re.compile(r"^\s*(async\s+)?def\s+\w+\s*\(")` 命中且该行未同时提及全部 `_claim_params` 者。
+- **新函数 `_support_candidates(claim, relevant)`**：返回通过上述全部过滤的正证据（`not _is_negation(e)`）。
+- **`supported` 分支改用 `_support_candidates`**：过滤后为空 → 返回 `no_evidence`，`confidence=Confidence.low`，`reason="仅见名称或签名，未见声称参数组合的实现"`，`locator=_locator_evidence(relevant)`，`coverage=_coverage(trace)`，`rounds` 透传。
+- **`_locator_evidence` 对非反证结论的定位**：在「非依赖声明、非否定行」之上，再优先排除 `_is_test_file` 与 `_IMPORT_LINE_RE` 命中的证据；不得让 `supported` 的定位指到 `tests/`。
+- **既有用例预期随 @10 收紧**：`test_matcher.py::test_impl_terms_do_not_admit_unrelated_negation` 的断言由 `supported` 改为 `no_evidence`（保留 `not contradicted`）。理由：`AsyncFileLock` 是异步锁，`asyncio.py:330` 的 `with` 在 async 上下文，对「同步 with」属于语义错配，该行不应再算有效正证据；用例原本要守的「不相关 Windows 否定声明不构成反证」不变。
+- **不变项**：反证分支（`contradicted` 优先于一切）不动；`_ABILITY_TYPES` 的 bench 分支不动；`no_evidence` 的既有首次返回不动；`claim_terms` / `feature_terms` / `impl_terms` / `_mentions_snippet` / `NEGATION_MARKERS` / `prober.py` / `negation.py` 一律不动。
+- **验收口径**：30 条真反证 `supported` 由 18 降到 ≤ 8（实测 6）；32 条真实现 `supported` 由 12 不得低于 8（实测 8）；real 侧 4 条降级逐条注明：2 条证据全在 `tests/`、2 条证据仅类声明行；六份 `reports/fx-*.md` 的 diff 只允许落在受影响的判定行，必须逐份核对并在交付说明里逐条列出。
+- **实测**：六份 `reports/fx-*.md` 逐字不变（`git status --short gap-engine/reports/` 为空）。30 条真反证 `supported / no_evidence / contradicted` = **6 / 23 / 1**（6+23+1=30，无判定域外、无不可验收），`supported` 由 18 降到 **6**。32 条真实现 = **supported 8 / 查过没找到 19 / 判定域外 4 / 不可验收 1**（8+19+4+1=32，`contradicted` 0），`supported` 由 12 降到 **8**；precision `N=8/8`（分母 = 确定判断 supported 8 + contradicted 0），recall `N=8/32`，按可判 27 条口径 `N=8/27`。4 条降级原因：`支持可取消的 acquire` 与 `AsyncFileLock 支持自定义 executor 与事件循环` 的正证据全在 `tests/`（`tests/test_async_filelock_acquire_cancellation.py:28`、`tests/test_async_filelock_runner_shutdown.py:23`、`tests/test_async_filelock_transition_admission.py:31`），测试里的同名调用不证明实现支持该参数组合；`SoftFileLease 提供带心跳的过期声明` 与 `SoftFileLease 支持 on_compromise 回调` 的唯一证据是 `src/filelock/_lease.py:62 class SoftFileLease(MarkerSoftFileLock):`，类声明行只证明类存在与基类，不证明参数级功能。
 
 ## 入口兜底（C-PIPELINE@5）
 
