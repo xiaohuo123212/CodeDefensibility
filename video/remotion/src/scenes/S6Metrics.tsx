@@ -12,7 +12,7 @@ const FRAME_HEIGHT = 900;
 // 两页并排成一个 200% 宽的 track，翻页靠整体横移 50%，中途两页各自只在半幅内可见，
 // 彻底避免「交叉淡化时整页文字重叠成重影」。
 const SLIDE_FRAMES = 16;
-// P13 整页数字均为 N=? 占位，故以「画框内缘青色微光」呼吸承载待填语义；
+// P13 为实测数字页，画框内缘以「青色微光」呼吸缓和白底页接进深色框的硬切；
 // 不做整页 opacity 呼吸，避免白底页在深色框里肉眼可见地闪。
 const BREATH_PERIOD = 40;
 const BREATH_MIN = 0.72;
@@ -85,7 +85,7 @@ export const S6Metrics: React.FC<SceneProps> = ({ range }) => {
               <Img src={staticFile('ppt/P15.png')} style={PAGE} />
             </div>
           </div>
-          {/* 待填语义：呼吸落在画框内缘的青色微光上（inset 不会被 overflow 裁掉） */}
+          {/* 翻页缓和：呼吸落在画框内缘的青色微光上（inset 不会被 overflow 裁掉） */}
           <div
             style={{
               position: 'absolute',
